@@ -15,7 +15,7 @@ Opens a frozen snapshot of the agent's last response in a zoomed TUI pane. Selec
 ## Requirements
 
 - [Herdr](https://herdr.io) ≥ 0.7.5
-- Python 3 (standard library only)
+- Python 3 with [Textual](https://github.com/Textualize/textual) (`pip install textual`)
 
 ## Installation
 

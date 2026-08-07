@@ -14,46 +14,9 @@ if [ -n "$meta" ] && [ -f "$meta" ]; then
   snapshot_file="${SNAPSHOT_FILE:-}"
 fi
 
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 "$plugin_dir/output_comment_composer.py"
+if ! python3 -c "import textual" 2>/dev/null; then
+  echo "output-comment-composer: textual not installed. Run: pip install textual" >&2
+  exit 1
 fi
 
-clear_screen() {
-  printf '\033[2J\033[H'
-}
-
-render() {
-  clear_screen
-  printf 'Output Comment Composer — snapshot-only MVP\n'
-  printf 'Source pane: %s\n' "$source_pane"
-  printf 'Keys: q/Esc close. Comments/send are not implemented in Slice 1.\n'
-  printf '%s\n' '────────────────────────────────────────────────────────────────────────'
-  if [ -n "$snapshot_file" ] && [ -f "$snapshot_file" ]; then
-    cat "$snapshot_file"
-  else
-    printf 'No snapshot available.\n'
-  fi
-}
-
-cleanup() {
-  stty sane 2>/dev/null || true
-  if [ -n "$snapshot_file" ] && [ -f "$snapshot_file" ]; then
-    rm -f "$snapshot_file" 2>/dev/null || true
-    rmdir "$(dirname "$snapshot_file")" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT INT TERM
-
-render
-
-old_stty=$(stty -g 2>/dev/null || true)
-stty -echo -icanon time 1 min 0 2>/dev/null || true
-while :; do
-  key=$(dd bs=1 count=1 2>/dev/null || true)
-  case "$key" in
-    q) break ;;
-    $'\033') break ;;
-    "") sleep 0.05 ;;
-  esac
-done
-[ -n "$old_stty" ] && stty "$old_stty" 2>/dev/null || true
+exec python3 "$plugin_dir/output_comment_composer.py"

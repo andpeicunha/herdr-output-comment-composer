@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
+"""Output Comment Composer — Textual TUI rewrite."""
+from __future__ import annotations
+
 import os
-import re
-import select
-import shutil
-import signal
 import subprocess
-import sys
-import termios
-import textwrap
-import tty
+from typing import Optional
+
+from rich.segment import Segment
+from rich.style import Style
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.color import Color
+from textual.containers import Vertical
+from textual.events import Key, MouseDown, MouseMove, MouseUp
+from textual.geometry import Size
+from textual.scroll_view import ScrollView
+from textual.strip import Strip
+from textual.widgets import Footer, Label, TextArea
 
 
-HEADER_LINES = 4
+# ---------------------------------------------------------------------------
+# Metadata loading
+# ---------------------------------------------------------------------------
 
 
-def load_meta():
+def load_meta() -> tuple[str, str]:
     source_pane = os.environ.get("HERDR_PANE_ID", "unknown")
     snapshot_file = ""
     meta = os.environ.get("OUTPUT_COMMENT_COMPOSER_META", "")
@@ -31,47 +41,460 @@ def load_meta():
     return source_pane, snapshot_file
 
 
-class Composer:
-    def __init__(self):
-        self.source_pane, self.snapshot_file = load_meta()
-        self.lines = self.load_snapshot()
-        self.comments = []
-        self.selection = None
-        self.drag_anchor = None
-        self.status = "Drag to select │ j/k=scroll  d/u=half-page  g/G=top/bottom  s=send  q/Esc=close"
-        self.old_term = None
-        self.visual_to_line = {}
-        self.running = True
-        self.scroll_offset = 0
+# ---------------------------------------------------------------------------
+# Snapshot viewer widget
+# ---------------------------------------------------------------------------
 
-    def load_snapshot(self):
+_LINENO_STYLE = Style(color="grey50")
+_SEP_STYLE = Style(color="grey35")
+_CONTENT_STYLE = Style()
+_SELECTED_BG = Color.parse("#1a3a1a")  # dark green tint
+_SELECTED_STYLE = Style(bgcolor=_SELECTED_BG.rich_color)
+
+
+class SnapshotViewer(ScrollView):
+    """Scrollable line viewer with mouse-drag selection."""
+
+    BINDINGS = [
+        Binding("j", "scroll_down_line", "Down", show=False),
+        Binding("k", "scroll_up_line", "Up", show=False),
+    ]
+
+    def __init__(self, lines: list[str], comments_ref: list[tuple[int, int, str]] | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self.snap_lines = lines
+        self.comments_ref = comments_ref if comments_ref is not None else []
+        self.sel_start: Optional[int] = None
+        self.sel_end: Optional[int] = None
+        self._drag_anchor: Optional[int] = None
+        self._dragging = False
+        self._row_map: list[tuple[str, int | str]] = []
+        self._refresh_row_map()
+
+    def _refresh_row_map(self) -> None:
+        """Build row map from comments_ref. Each row is ('line', line_idx) or ('annotation', text)."""
+        # Map from line_idx -> comment text (last comment wins if overlapping)
+        after: dict[int, str] = {}
+        for s, e, text in self.comments_ref:
+            after[e] = text
+        rows: list[tuple[str, int | str]] = []
+        for i in range(len(self.snap_lines)):
+            rows.append(("line", i))
+            if i in after:
+                rows.append(("annotation", after[i]))
+        self._row_map = rows
+
+    # ------------------------------------------------------------------
+    # ScrollView protocol
+    # ------------------------------------------------------------------
+
+    def get_content_height(self, container: Size, viewport: Size, width: int) -> int:
+        return len(self._row_map)
+
+    def render_line(self, y: int) -> Strip:
+        row_idx = y + int(self.scroll_offset.y)
+        if row_idx < 0 or row_idx >= len(self._row_map):
+            return Strip.blank(self.size.width)
+
+        kind, value = self._row_map[row_idx]
+        width = self.size.width
+        lineno_width = max(3, len(str(len(self.snap_lines))))
+
+        if kind == "annotation":
+            # Render comment text line: "  ╰─ <truncated text>"
+            prefix = " " * lineno_width + "   ╰─ "
+            avail = width - len(prefix) - 1
+            text = str(value).replace("\n", " ")
+            if len(text) > avail:
+                text = text[:avail - 1] + "…"
+            annotation_style = Style(color="yellow", italic=True)
+            seg = Segment(prefix + text, annotation_style)
+            strip = Strip([seg]).extend_cell_length(width, annotation_style)
+            return strip.crop(0, width)
+
+        # kind == "line"
+        line_idx = value
+        assert isinstance(line_idx, int)
+        if line_idx < 0 or line_idx >= len(self.snap_lines):
+            return Strip.blank(width)
+
+        content = self.snap_lines[line_idx].replace("\t", "    ")
+
+        selected = (
+            self.sel_start is not None
+            and self.sel_end is not None
+            and self.sel_start <= line_idx <= self.sel_end
+        )
+
+        has_comment = any(s <= line_idx <= e for s, e, _ in self.comments_ref)
+
+        if has_comment:
+            lineno_str = f"●{line_idx + 1:>{lineno_width - 1}}"
+            lineno_style = Style(color="yellow")
+        else:
+            lineno_str = f"{line_idx + 1:>{lineno_width}}"
+            lineno_style = _LINENO_STYLE
+
+        sep = " │ "
+
+        if selected:
+            segments = [
+                Segment(lineno_str, lineno_style + _SELECTED_STYLE),
+                Segment(sep, _SEP_STYLE + _SELECTED_STYLE),
+                Segment(content, _SELECTED_STYLE),
+            ]
+            strip = Strip(segments)
+            strip = strip.extend_cell_length(width, _SELECTED_STYLE)
+        else:
+            segments = [
+                Segment(lineno_str, lineno_style),
+                Segment(sep, _SEP_STYLE),
+                Segment(content, _CONTENT_STYLE),
+            ]
+            strip = Strip(segments)
+            strip = strip.extend_cell_length(width)
+
+        return strip.crop(0, width)
+
+    # ------------------------------------------------------------------
+    # Mouse selection
+    # ------------------------------------------------------------------
+
+    def _y_to_line(self, y: int) -> Optional[int]:
+        row_idx = y + int(self.scroll_offset.y)
+        if row_idx < 0 or row_idx >= len(self._row_map):
+            return None
+        kind, value = self._row_map[row_idx]
+        if kind == "annotation":
+            return None
+        return value  # type: ignore[return-value]
+
+    def on_mouse_down(self, event: MouseDown) -> None:
+        if event.button != 1:
+            return
+        line = self._y_to_line(event.y)
+        if line is None:
+            return
+        self._drag_anchor = line
+        self._dragging = True
+        self.sel_start = line
+        self.sel_end = line
+        self.refresh()
+        event.stop()
+
+    def on_mouse_move(self, event: MouseMove) -> None:
+        if not self._dragging or self._drag_anchor is None:
+            return
+        line = self._y_to_line(event.y)
+        if line is None:
+            return
+        a, b = sorted((self._drag_anchor, line))
+        self.sel_start = a
+        self.sel_end = b
+        self.refresh()
+        event.stop()
+
+    def on_mouse_up(self, event: MouseUp) -> None:
+        if not self._dragging:
+            return
+        line = self._y_to_line(event.y)
+        if line is not None and self._drag_anchor is not None:
+            a, b = sorted((self._drag_anchor, line))
+            self.sel_start = a
+            self.sel_end = b
+        self._dragging = False
+        self._drag_anchor = None
+        self.refresh()
+        event.stop()
+
+    # ------------------------------------------------------------------
+    # Keyboard scroll helpers
+    # ------------------------------------------------------------------
+
+    def action_scroll_down_line(self) -> None:
+        self.scroll_relative(y=1)
+
+    def action_scroll_up_line(self) -> None:
+        self.scroll_relative(y=-1)
+
+    # ------------------------------------------------------------------
+    # Selection helpers
+    # ------------------------------------------------------------------
+
+    def has_selection(self) -> bool:
+        return self.sel_start is not None and self.sel_end is not None
+
+    def selection_label(self) -> str:
+        if not self.has_selection():
+            return ""
+        assert self.sel_start is not None and self.sel_end is not None
+        if self.sel_start == self.sel_end:
+            return f"line {self.sel_start + 1}"
+        return f"lines {self.sel_start + 1}–{self.sel_end + 1}"
+
+
+# ---------------------------------------------------------------------------
+# Comment input widget
+# ---------------------------------------------------------------------------
+
+
+class CommentInput(TextArea):
+    """Multi-line TextArea with ctrl+s=save, escape=cancel."""
+
+    BINDINGS = [
+        Binding("ctrl+s", "save_comment", "Save", show=False),
+        Binding("escape", "cancel_comment", "Cancel", show=False),
+    ]
+
+    def action_save_comment(self) -> None:
+        self.app.save_comment()  # type: ignore[attr-defined]
+
+    def action_cancel_comment(self) -> None:
+        self.app.cancel_comment()  # type: ignore[attr-defined]
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "enter":
+            self.insert("\n")
+            event.stop()
+            event.prevent_default()
+
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+_APP_CSS = """
+Screen {
+    background: $background;
+    layers: base overlay;
+}
+
+#viewer {
+    height: 1fr;
+    border: none;
+    scrollbar-gutter: stable;
+}
+
+#comment-panel {
+    height: auto;
+    max-height: 14;
+    border: solid $success;
+    display: none;
+    padding: 0 1;
+}
+
+#comment-panel.visible {
+    display: block;
+}
+
+#comment-label {
+    color: $success;
+    height: 1;
+    padding: 0 0;
+}
+
+#comment-input {
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    background: $panel;
+    border: none;
+    color: $text;
+}
+
+#comment-hint {
+    color: $text-muted;
+    height: 1;
+    text-align: right;
+}
+
+Footer {
+    background: $panel;
+    color: $text-muted;
+}
+"""
+
+
+class ComposerApp(App[None]):
+    CSS = _APP_CSS
+    TITLE = "Output Comment Composer"
+
+    BINDINGS = [
+        Binding("c", "open_comment", "comment", show=True),
+        Binding("s", "send_comments", "send", show=True),
+        Binding("q", "quit", "quit", show=True),
+        Binding("escape", "quit", "quit", show=False),
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.source_pane, self.snapshot_file = load_meta()
+        self.snap_lines = self._load_snapshot()
+        self.comments: list[tuple[int, int, str]] = []
+        self._editing_comment_idx: Optional[int] = None
+
+    def _load_snapshot(self) -> list[str]:
         if self.snapshot_file and os.path.isfile(self.snapshot_file):
             with open(self.snapshot_file, encoding="utf-8", errors="replace") as f:
                 return f.read().splitlines()
         return ["No snapshot available."]
 
-    def wrap_lines(self, cols):
-        """Return list of (logical_idx, visual_text) with word-wrap applied."""
-        line_no_width = max(3, len(str(len(self.lines))))
-        prefix_width = line_no_width + 3  # " N │ "
-        wrap_width = max(20, cols - prefix_width)
-        result = []
-        for idx, line in enumerate(self.lines):
-            text = line.replace("\t", "    ")
-            if not text:
-                result.append((idx, ""))
-                continue
-            wrapped = textwrap.wrap(text, width=wrap_width) or [""]
-            for i, part in enumerate(wrapped):
-                result.append((idx, part if i == 0 else "  " + part))
-        return result
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
 
-    def cleanup(self):
-        # Disable mouse, restore cursor, leave alternate screen
-        sys.stdout.write("\033[?1006l\033[?1002l\033[?1000l\033[?25h\033[0m\033[?1049l")
-        sys.stdout.flush()
-        if self.old_term is not None:
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self.old_term)
+    def compose(self) -> ComposeResult:
+        yield SnapshotViewer(self.snap_lines, comments_ref=self.comments, id="viewer")
+        with Vertical(id="comment-panel"):
+            yield Label("comment", id="comment-label")
+            yield CommentInput("", language=None, id="comment-input", soft_wrap=True)
+            yield Label("ctrl+s save · esc cancel", id="comment-hint")
+        yield Footer()
+
+    # ------------------------------------------------------------------
+    # Subtitle / title update
+    # ------------------------------------------------------------------
+
+    def on_mount(self) -> None:
+        self.sub_title = f"source: {self.source_pane}"
+
+    # ------------------------------------------------------------------
+    # Comment panel open/close
+    # ------------------------------------------------------------------
+
+    def action_open_comment(self) -> None:
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        if not viewer.has_selection():
+            self.notify("Select lines first (mouse drag)", severity="warning")
+            return
+
+        # Find existing comment for this selection
+        self._editing_comment_idx = None
+        existing_text = ""
+        for i, (s, e, text) in enumerate(self.comments):
+            if s == viewer.sel_start and e == viewer.sel_end:
+                self._editing_comment_idx = i
+                existing_text = text
+                break
+
+        panel = self.query_one("#comment-panel")
+        label = self.query_one("#comment-label", Label)
+        mode = "edit comment" if self._editing_comment_idx is not None else "comment"
+        label.update(f"{mode} · {viewer.selection_label()}")
+        panel.add_class("visible")
+        inp = self.query_one("#comment-input", CommentInput)
+        inp.clear()
+        if existing_text:
+            inp.insert(existing_text)
+        inp.focus()
+
+    def save_comment(self) -> None:
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        inp = self.query_one("#comment-input", CommentInput)
+        text = inp.text.strip()
+        panel = self.query_one("#comment-panel")
+
+        if viewer.has_selection():
+            assert viewer.sel_start is not None and viewer.sel_end is not None
+            if self._editing_comment_idx is not None:
+                if text:
+                    # Replace existing
+                    self.comments[self._editing_comment_idx] = (viewer.sel_start, viewer.sel_end, text)
+                    self.notify(
+                        f"Comment updated ({viewer.selection_label()})",
+                        severity="information",
+                    )
+                else:
+                    # Empty text = delete
+                    del self.comments[self._editing_comment_idx]
+                    self.notify(
+                        f"Comment removed ({viewer.selection_label()})",
+                        severity="warning",
+                    )
+                self._editing_comment_idx = None
+            elif text:
+                self.comments.append((viewer.sel_start, viewer.sel_end, text))
+                self.notify(
+                    f"Comment stored ({viewer.selection_label()})",
+                    severity="information",
+                )
+
+            self.sub_title = f"source: {self.source_pane} · {len(self.comments)} comment(s)"
+            viewer._refresh_row_map()
+            viewer.refresh()
+
+        panel.remove_class("visible")
+        inp.clear()
+        viewer.focus()
+
+    def cancel_comment(self) -> None:
+        panel = self.query_one("#comment-panel")
+        panel.remove_class("visible")
+        inp = self.query_one("#comment-input", CommentInput)
+        inp.clear()
+        self.query_one("#viewer", SnapshotViewer).focus()
+
+    # ------------------------------------------------------------------
+    # Send logic (identical to original)
+    # ------------------------------------------------------------------
+
+    def _build_prompt(self) -> str:
+        parts = ["Please address these comments on your previous output:"]
+        for i, (s, e, comment) in enumerate(self.comments, 1):
+            quote = "\n".join(f"> {line}" for line in self.snap_lines[s : e + 1])
+            parts.append(
+                f"Comment {i} on lines {s + 1}–{e + 1}:\n"
+                f"{quote}\n\n"
+                f"Comment:\n{comment}"
+            )
+        return "\n\n".join(parts) + "\n"
+
+    def action_send_comments(self) -> None:
+        if not self.comments:
+            self.notify("No comments yet — add one with c", severity="warning")
+            return
+        if not self.source_pane or self.source_pane == "unknown":
+            self.notify("Cannot send: source pane unknown", severity="error")
+            return
+        prompt = self._build_prompt()
+        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
+        result = subprocess.run(
+            [herdr, "agent", "prompt", self.source_pane, prompt],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0:
+            r2 = subprocess.run(
+                [herdr, "pane", "send-text", self.source_pane, prompt],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if r2.returncode == 0:
+                subprocess.run(
+                    [herdr, "agent", "send-keys", self.source_pane, "Enter"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            else:
+                err = (result.stderr or r2.stderr or "").strip()
+                self.notify(
+                    f"Send failed: {err[:120]}" if err else "Send failed",
+                    severity="error",
+                    timeout=6,
+                )
+                return
+        self.notify(f"Sent {len(self.comments)} comment(s)", severity="information")
+        self._cleanup()
+        self.exit()
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def _cleanup(self) -> None:
         if self.snapshot_file and os.path.isfile(self.snapshot_file):
             try:
                 os.unlink(self.snapshot_file)
@@ -79,258 +502,17 @@ class Composer:
             except OSError:
                 pass
 
-    def line_for_y(self, y):
-        return self.visual_to_line.get(y)
-
-    def set_selection(self, a, b):
-        if a is None or b is None:
+    def action_quit(self) -> None:
+        # Only quit when comment panel is hidden; otherwise let escape cancel comment
+        panel = self.query_one("#comment-panel")
+        if "visible" in panel.classes:
             return
-        start, end = sorted((a, b))
-        self.selection = (start, end)
-        self.status = f"Selected {start + 1}-{end + 1} │ c/Enter=comment  s=send  q/Esc=close"
+        self._cleanup()
+        self.exit()
 
-    def selected(self, idx):
-        return self.selection and self.selection[0] <= idx <= self.selection[1]
-
-    def fmt_status(self, text):
-        """Bold+yellow the shortcut keys (patterns like j/k=scroll or c/Enter=comentar)."""
-        return re.sub(
-            r'([A-Za-z][A-Za-z0-9/]*)(\=[^\s│]+)',
-            lambda m: f"\033[1;33m{m.group(1)}\033[0m{m.group(2)}",
-            text,
-        )
-
-    def clamp_scroll_visual(self, total_visual, rows):
-        content_rows = rows - HEADER_LINES
-        max_offset = max(0, total_visual - content_rows)
-        self.scroll_offset = max(0, min(self.scroll_offset, max_offset))
-
-    def render(self):
-        cols, rows = shutil.get_terminal_size((100, 30))
-        line_no_width = max(3, len(str(len(self.lines))))
-        prefix_width = line_no_width + 3
-        visual_lines = self.wrap_lines(cols)
-        total_visual = len(visual_lines)
-        self.clamp_scroll_visual(total_visual, rows)
-        self.visual_to_line = {}
-        content_rows = rows - HEADER_LINES
-        pct = f" [{self.scroll_offset + 1}-{min(self.scroll_offset + content_rows, total_visual)}/{total_visual}]" if total_visual else ""
-        out = ["\033[3J\033[2J\033[H\033[?25l"]
-        out.append(f"Output Comment Composer — frozen snapshot{pct}\r\n")
-        out.append(f"Source pane: {self.source_pane}\r\n")
-        out.append(self.fmt_status(self.status) + "\033[0m\r\n")
-        out.append(("─" * max(1, cols)) + "\r\n")
-        y = HEADER_LINES + 1
-        comment_by_end = {}
-        for start, end, text in self.comments:
-            comment_by_end.setdefault(end, []).append((start, text))
-        prev_idx = None
-        for vi in range(self.scroll_offset, total_visual):
-            if y > rows:
-                break
-            idx, part = visual_lines[vi]
-            self.visual_to_line[y] = idx
-            if idx != prev_idx:
-                prefix = f"{idx + 1:>{line_no_width}} │ "
-                prev_idx = idx
-            else:
-                prefix = " " * prefix_width
-            text = (prefix + part)[:cols]
-            if self.selected(idx):
-                out.append("\033[7m" + text.ljust(cols) + "\033[0m\r\n")
-            else:
-                out.append(text + "\r\n")
-            y += 1
-            # Show inline comments after last visual row of this logical line
-            next_idx = visual_lines[vi + 1][0] if vi + 1 < total_visual else -1
-            if next_idx != idx:
-                for start, comment in comment_by_end.get(idx, []):
-                    if y > rows:
-                        break
-                    label = f"      ↳ comment on {start + 1}-{idx + 1}: "
-                    out.append((label + comment)[:cols] + "\r\n")
-                    y += 1
-        sys.stdout.write("".join(out))
-        sys.stdout.flush()
-
-    def prompt_comment(self):
-        if not self.selection:
-            self.status = "Select one or more snapshot lines first."
-            return
-        start, end = self.selection
-        sys.stdout.write("\033[?25h\033[0m\r\nComment: ")
-        sys.stdout.flush()
-        chars = []
-        text = ""
-        cancelled = False
-        def read_char():
-            """Read one Unicode character from stdin, handling multi-byte UTF-8."""
-            first = os.read(sys.stdin.fileno(), 1)
-            if not first:
-                return ""
-            b = first[0]
-            if b < 0x80:
-                n = 0
-            elif b < 0xE0:
-                n = 1
-            elif b < 0xF0:
-                n = 2
-            else:
-                n = 3
-            rest = b"" if n == 0 else os.read(sys.stdin.fileno(), n)
-            return (first + rest).decode("utf-8", "replace")
-
-        while True:
-            ch = read_char()
-            if ch in ("\r", "\n"):
-                text = "".join(chars)
-                break
-            if ch == "\x1b":
-                cancelled = True
-                break
-            if ch in ("\x7f", "\b"):
-                if chars:
-                    chars.pop()
-                    sys.stdout.write("\b \b")
-                    sys.stdout.flush()
-                continue
-            if ch >= " ":
-                chars.append(ch)
-                sys.stdout.write(ch)
-                sys.stdout.flush()
-        sys.stdout.write("\033[?25l")
-        if text:
-            self.comments.append((start, end, text))
-            self.status = f"Stored temporary comment on lines {start + 1}-{end + 1}."
-        else:
-            self.status = "Comment cancelled." if cancelled else "Empty comment cancelled."
-
-    def build_prompt(self):
-        parts = ["Please address these comments on your previous output:"]
-        for i, (start, end, comment) in enumerate(self.comments, 1):
-            quote = "\n".join(f"> {line}" for line in self.lines[start : end + 1])
-            parts.append(
-                f"Comment {i} on lines {start + 1}-{end + 1}:\n"
-                f"{quote}\n\n"
-                f"Comment:\n{comment}"
-            )
-        return "\n\n".join(parts) + "\n"
-
-    def send_comments(self):
-        if not self.comments:
-            self.status = "No temporary comments to send. Add a comment first."
-            return
-        if not self.source_pane or self.source_pane == "unknown":
-            self.status = "Cannot send: original source pane is unknown."
-            return
-
-        prompt = self.build_prompt()
-        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-        agent_result = subprocess.run(
-            [herdr, "agent", "prompt", self.source_pane, prompt],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if agent_result.returncode != 0:
-            text_result = subprocess.run(
-                [herdr, "pane", "send-text", self.source_pane, prompt],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            keys_result = None
-            if text_result.returncode == 0:
-                keys_result = subprocess.run(
-                    [herdr, "agent", "send-keys", self.source_pane, "Enter"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-            if text_result.returncode != 0 or not keys_result or keys_result.returncode != 0:
-                err = (agent_result.stderr or text_result.stderr or (keys_result.stderr if keys_result else "")).strip()
-                self.status = f"Send failed{': ' + err[:80] if err else '.'}"
-                return
-
-        self.status = f"Sent {len(self.comments)} comment(s) to source pane; closing."
-        self.running = False
-
-    def handle_mouse(self, seq):
-        m = re.match(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])", seq)
-        if not m:
-            return
-        button, _x, y, kind = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
-        # Mouse wheel: button 64 = scroll up, 65 = scroll down
-        if button == 64:
-            self.scroll_offset -= 3
-            return
-        if button == 65:
-            self.scroll_offset += 3
-            return
-        line = self.line_for_y(y)
-        if line is None:
-            return
-        if kind == "M" and button == 0:
-            self.drag_anchor = line
-            self.set_selection(line, line)
-        elif kind == "M" and button & 32 and self.drag_anchor is not None:
-            self.set_selection(self.drag_anchor, line)
-        elif kind == "m" and self.drag_anchor is not None:
-            self.set_selection(self.drag_anchor, line)
-            self.drag_anchor = None
-
-    def read_key(self):
-        if not select.select([sys.stdin], [], [], 0.1)[0]:
-            return ""
-        ch = os.read(sys.stdin.fileno(), 1).decode("utf-8", "replace")
-        if ch != "\x1b":
-            return ch
-        while select.select([sys.stdin], [], [], 0.01)[0]:
-            ch += os.read(sys.stdin.fileno(), 1).decode("utf-8", "replace")
-            if re.match(r"\x1b\[<\d+;\d+;\d+[Mm]$", ch):
-                break
-        return ch
-
-    def run(self):
-        self.old_term = termios.tcgetattr(sys.stdin.fileno())
-        tty.setcbreak(sys.stdin.fileno())
-        # Enter alternate screen + enable mouse; alternate screen prevents
-        # scrollback pollution (same as ratatui/crossterm behaviour)
-        sys.stdout.write("\033[?1049h\033[?1000h\033[?1002h\033[?1006h")
-        sys.stdout.flush()
-        signal.signal(signal.SIGWINCH, lambda *_: self.render())
-        try:
-            self.render()
-            while self.running:
-                key = self.read_key()
-                if not key:
-                    continue
-                if key in ("q", "\x1b"):
-                    break
-                if key in ("c", "\r", "\n"):
-                    self.prompt_comment()
-                elif key == "s":
-                    self.send_comments()
-                elif key in ("j", "\x1b[B"):   # j or down arrow
-                    self.scroll_offset += 1
-                elif key in ("k", "\x1b[A"):   # k or up arrow
-                    self.scroll_offset -= 1
-                elif key in ("d",):             # half-page down
-                    _, rows = shutil.get_terminal_size((100, 30))
-                    self.scroll_offset += max(1, (rows - HEADER_LINES) // 2)
-                elif key in ("u",):             # half-page up
-                    _, rows = shutil.get_terminal_size((100, 30))
-                    self.scroll_offset -= max(1, (rows - HEADER_LINES) // 2)
-                elif key in ("g",):             # top
-                    self.scroll_offset = 0
-                elif key in ("G",):             # bottom
-                    self.scroll_offset = len(self.lines)
-                elif key.startswith("\x1b[<"):
-                    self.handle_mouse(key)
-                self.render()
-        finally:
-            self.cleanup()
+    def on_unmount(self) -> None:
+        self._cleanup()
 
 
 if __name__ == "__main__":
-    Composer().run()
+    ComposerApp().run()
