@@ -15,7 +15,19 @@ Opens a frozen snapshot of the agent's last response in a zoomed TUI pane. Selec
 ## Requirements
 
 - [Herdr](https://herdr.io) ≥ 0.7.5
-- Python 3 with [Textual](https://github.com/Textualize/textual) (`pip install textual`)
+- Python 3 with [Textual](https://github.com/Textualize/textual)
+
+The plugin will try to install Textual automatically on `herdr plugin install`.
+If that fails (e.g. pip is not available), install it manually:
+
+```sh
+# macOS / most Linux
+pip3 install textual
+
+# Ubuntu / Debian / WSL (if pip is not installed)
+sudo apt install python3-pip
+pip3 install textual
+```
 
 ## Installation
 
