@@ -1,0 +1,30 @@
+id = "andpeicunha.output-comment-composer"
+name = "output-comment-composer"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+platforms = ["macos", "linux"]
+description = "Compose comments over a frozen snapshot of the current Herdr agent pane output."
+
+[[panes]]
+id = "pane"
+title = "output comments"
+placement = "zoomed"
+command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/output-comment-composer\""]
+
+[[actions]]
+id = "toggle"
+title = "output comments: toggle composer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "toggle"]
+
+[[actions]]
+id = "open"
+title = "output comments: open composer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "open"]
+
+[[actions]]
+id = "close"
+title = "output comments: close composer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "close"]
