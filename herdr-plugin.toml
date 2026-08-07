@@ -5,8 +5,9 @@ min_herdr_version = "0.7.5"
 platforms = ["macos", "linux"]
 description = "Compose comments over a frozen snapshot of the current Herdr agent pane output."
 
-[[build_commands]]
-command = ["pip3", "install", "textual"]
+[[build]]
+platforms = ["macos", "linux"]
+command = ["/bin/sh", "scripts/install-deps.sh"]
 
 [[panes]]
 id = "pane"
