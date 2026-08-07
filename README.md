@@ -27,6 +27,9 @@ pip3 install textual
 # Ubuntu / Debian / WSL (if pip is not installed)
 sudo apt install python3-pip
 pip3 install textual
+
+# Ubuntu 24+ / externally-managed Python (PEP 668)
+pip3 install textual --break-system-packages
 ```
 
 ## Installation
