@@ -555,7 +555,7 @@ class ComposerApp(App[None]):
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.snap_lines = message.lines
         viewer._refresh_row_map()
-        viewer.refresh()
+        viewer.refresh(layout=True)
         viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
