@@ -22,7 +22,7 @@ from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
 from textual.widgets import Footer, Label, LoadingIndicator, TextArea
-from textual.worker import work
+from textual import work
 
 
 # ---------------------------------------------------------------------------
