@@ -366,19 +366,17 @@ class ComposerApp(App[None]):
     # Async snapshot fetch
     # ------------------------------------------------------------------
 
-    @work(thread=True)
-    def _fetch_snapshot(self) -> None:
+    @work
+    async def _fetch_snapshot(self) -> None:
+        import asyncio
         try:
-            lines = self._do_fetch()
+            lines = await asyncio.to_thread(self._do_fetch)
         except Exception as e:
             debug_dir = os.environ.get("OCC_DEBUG_DIR", "")
             if debug_dir:
                 with open(os.path.join(debug_dir, "bash.log"), "a") as f:
                     f.write(f"py:fetch-exception {e}\n")
             lines = [f"Error loading snapshot: {e}"]
-        self.app.call_from_thread(self._on_fetch_done, lines)
-
-    def _on_fetch_done(self, lines: list[str]) -> None:
         self.post_message(self.SnapshotReady(lines))
 
     def _do_fetch(self) -> list[str]:
