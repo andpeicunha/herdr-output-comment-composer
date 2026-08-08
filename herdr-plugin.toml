@@ -11,7 +11,7 @@ command = ["/bin/sh", "scripts/install-deps.sh"]
 
 [[panes]]
 id = "pane"
-title = "output comments · @andpeicunha"
+title = "output comments"
 placement = "zoomed"
 command = ["sh", "-c", "exec \"$HERDR_PLUGIN_ROOT/bin/output-comment-composer\""]
 
