@@ -199,6 +199,7 @@ class SnapshotViewer(ScrollView):
     # ------------------------------------------------------------------
 
     def _y_to_line(self, y: int) -> Optional[int]:
+        y = y - 1  # compensate for 1-cell top border
         row_idx = y + int(self.scroll_offset.y)
         if row_idx < 0 or row_idx >= len(self._row_map):
             return None
