@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import textwrap
 from typing import Optional
 
 from rich.segment import Segment
@@ -83,27 +84,50 @@ class SnapshotViewer(ScrollView):
         self.sel_end: Optional[int] = None
         self._drag_anchor: Optional[int] = None
         self._dragging = False
-        self._row_map: list[tuple[str, int | str]] = []
+        self._row_map: list[tuple[str, tuple]] = []
+        self._wrap_width: int = 0
         self._refresh_row_map()
 
-    def _refresh_row_map(self) -> None:
-        """Build row map from comments_ref. Each row is ('line', line_idx) or ('annotation', text)."""
-        # Map from line_idx -> comment text (last comment wins if overlapping)
+    def _refresh_row_map(self, wrap_width: int = 0) -> None:
+        """Build row map with word-wrap support.
+
+        Each row is one of:
+          ('line_chunk', (line_idx, chunk_idx, chunk_text))
+          ('annotation', (text,))
+        """
+        self._wrap_width = wrap_width
+        lineno_width = max(3, len(str(max(len(self.snap_lines), 1))))
+        sep_width = 3  # " │ "
+        avail = wrap_width - lineno_width - sep_width if wrap_width > lineno_width + sep_width + 12 else 0
+
         after: dict[int, str] = {}
         for s, e, text in self.comments_ref:
             after[e] = text
-        rows: list[tuple[str, int | str]] = []
+
+        rows: list[tuple[str, tuple]] = []
         for i in range(len(self.snap_lines)):
-            rows.append(("line", i))
+            content = self.snap_lines[i].replace("\t", "    ")
+            if avail > 0 and len(content) > avail:
+                chunks = textwrap.wrap(content, avail) or [""]
+            else:
+                chunks = [content]
+            for ci, chunk in enumerate(chunks):
+                rows.append(("line_chunk", (i, ci, chunk)))
             if i in after:
-                rows.append(("annotation", after[i]))
+                rows.append(("annotation", (after[i],)))
         self._row_map = rows
+
+    def on_resize(self) -> None:
+        self._refresh_row_map(self.size.width)
+        self.refresh(layout=True)
 
     # ------------------------------------------------------------------
     # ScrollView protocol
     # ------------------------------------------------------------------
 
     def get_content_height(self, container: Size, viewport: Size, width: int) -> int:
+        if width != self._wrap_width:
+            self._refresh_row_map(width)
         return len(self._row_map)
 
     def render_line(self, y: int) -> Strip:
@@ -113,13 +137,12 @@ class SnapshotViewer(ScrollView):
 
         kind, value = self._row_map[row_idx]
         width = self.size.width
-        lineno_width = max(3, len(str(len(self.snap_lines))))
+        lineno_width = max(3, len(str(max(len(self.snap_lines), 1))))
 
         if kind == "annotation":
-            # Render comment text line: "  ╰─ <truncated text>"
             prefix = " " * lineno_width + "   ╰─ "
-            avail = width - len(prefix) - 1
-            text = str(value).replace("\n", " ")
+            avail = max(1, width - len(prefix) - 1)
+            text = str(value[0]).replace("\n", " ")
             if len(text) > avail:
                 text = text[:avail - 1] + "…"
             annotation_style = Style(color="yellow", italic=True)
@@ -127,13 +150,10 @@ class SnapshotViewer(ScrollView):
             strip = Strip([seg]).extend_cell_length(width, annotation_style)
             return strip.crop(0, width)
 
-        # kind == "line"
-        line_idx = value
-        assert isinstance(line_idx, int)
+        # kind == "line_chunk"
+        line_idx, chunk_idx, content = value
         if line_idx < 0 or line_idx >= len(self.snap_lines):
             return Strip.blank(width)
-
-        content = self.snap_lines[line_idx].replace("\t", "    ")
 
         selected = (
             self.sel_start is not None
@@ -143,11 +163,16 @@ class SnapshotViewer(ScrollView):
 
         has_comment = any(s <= line_idx <= e for s, e, _ in self.comments_ref)
 
-        if has_comment:
-            lineno_str = f"●{line_idx + 1:>{lineno_width - 1}}"
-            lineno_style = Style(color="yellow")
+        if chunk_idx == 0:
+            if has_comment:
+                lineno_str = f"●{line_idx + 1:>{lineno_width - 1}}"
+                lineno_style = Style(color="yellow")
+            else:
+                lineno_str = f"{line_idx + 1:>{lineno_width}}"
+                lineno_style = _LINENO_STYLE
         else:
-            lineno_str = f"{line_idx + 1:>{lineno_width}}"
+            # Continuation line: blank lineno + wrap indicator
+            lineno_str = " " * (lineno_width - 1) + "↳"
             lineno_style = _LINENO_STYLE
 
         sep = " │ "
@@ -158,16 +183,14 @@ class SnapshotViewer(ScrollView):
                 Segment(sep, _SEP_STYLE + _SELECTED_STYLE),
                 Segment(content, _SELECTED_STYLE),
             ]
-            strip = Strip(segments)
-            strip = strip.extend_cell_length(width, _SELECTED_STYLE)
+            strip = Strip(segments).extend_cell_length(width, _SELECTED_STYLE)
         else:
             segments = [
                 Segment(lineno_str, lineno_style),
                 Segment(sep, _SEP_STYLE),
                 Segment(content, _CONTENT_STYLE),
             ]
-            strip = Strip(segments)
-            strip = strip.extend_cell_length(width)
+            strip = Strip(segments).extend_cell_length(width)
 
         return strip.crop(0, width)
 
@@ -182,7 +205,7 @@ class SnapshotViewer(ScrollView):
         kind, value = self._row_map[row_idx]
         if kind == "annotation":
             return None
-        return value  # type: ignore[return-value]
+        return value[0]  # line_idx
 
     def on_mouse_down(self, event: MouseDown) -> None:
         if event.button != 1:
@@ -324,15 +347,20 @@ Screen {
 }
 
 Footer {
-    background: $panel;
-    color: $text-muted;
+    background: #1a1730;
+    color: #a5b4fc;
+}
+
+Footer > .footer--key {
+    background: #312e81;
+    color: #c7d2fe;
 }
 """
 
 
 class ComposerApp(App[None]):
     CSS = _APP_CSS
-    TITLE = "Output Comment Composer"
+    TITLE = "output-comment-composer · @andpeicunha"
 
     BINDINGS = [
         Binding("c", "open_comment", "comment", show=True),
@@ -556,7 +584,7 @@ class ComposerApp(App[None]):
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.snap_lines = message.lines
-        viewer._refresh_row_map()
+        viewer._refresh_row_map(viewer.size.width)
         self.screen.refresh(layout=True)
         viewer.scroll_to(0, 0, animate=False)
         viewer.focus()
@@ -671,7 +699,7 @@ class ComposerApp(App[None]):
                 f"{quote}\n\n"
                 f"Comment:\n{comment}"
             )
-        return "\n\n".join(parts) + "\n"
+        return "\n\n".join(parts) + "\n\n— @andpeicunha\n"
 
     def action_send_comments(self) -> None:
         if not self.comments:
