@@ -116,6 +116,9 @@ class SnapshotViewer(ScrollView):
             if i in after:
                 rows.append(("annotation", (after[i],)))
         self._row_map = rows
+        if self.is_mounted:
+            w = wrap_width or self.size.width
+            self.virtual_size = Size(w, len(self._row_map))
 
     def on_resize(self) -> None:
         self._refresh_row_map(self.size.width)
