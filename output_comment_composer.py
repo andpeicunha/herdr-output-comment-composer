@@ -2,7 +2,11 @@
 """Output Comment Composer — Textual TUI rewrite."""
 from __future__ import annotations
 
+import json
 import os
+import re
+import shutil
+import sqlite3
 import subprocess
 from typing import Optional
 
@@ -14,9 +18,11 @@ from textual.color import Color
 from textual.containers import Vertical
 from textual.events import Key, MouseDown, MouseMove, MouseUp
 from textual.geometry import Size
+from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
-from textual.widgets import Footer, Label, TextArea
+from textual.widgets import Footer, Label, LoadingIndicator, TextArea
+from textual.worker import work
 
 
 # ---------------------------------------------------------------------------
@@ -24,9 +30,12 @@ from textual.widgets import Footer, Label, TextArea
 # ---------------------------------------------------------------------------
 
 
-def load_meta() -> tuple[str, str]:
+def load_meta() -> tuple[str, str, str, str]:
+    """Return (source_pane, session_id, source_cwd, agent)."""
     source_pane = os.environ.get("HERDR_PANE_ID", "unknown")
-    snapshot_file = ""
+    session_id = ""
+    source_cwd = ""
+    agent = ""
     meta = os.environ.get("OUTPUT_COMMENT_COMPOSER_META", "")
     if meta and os.path.isfile(meta):
         with open(meta, encoding="utf-8", errors="replace") as f:
@@ -36,9 +45,13 @@ def load_meta() -> tuple[str, str]:
                     continue
                 if key == "SOURCE_PANE_ID":
                     source_pane = value or source_pane
-                elif key == "SNAPSHOT_FILE":
-                    snapshot_file = value
-    return source_pane, snapshot_file
+                elif key == "SESSION_ID":
+                    session_id = value
+                elif key == "SOURCE_CWD":
+                    source_cwd = value
+                elif key == "AGENT":
+                    agent = value
+    return source_pane, session_id, source_cwd, agent
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +282,16 @@ Screen {
     layers: base overlay;
 }
 
+#loader {
+    height: 1fr;
+    display: block;
+}
+
 #viewer {
     height: 1fr;
     border: none;
     scrollbar-gutter: stable;
+    display: none;
 }
 
 #comment-panel {
@@ -326,25 +345,227 @@ class ComposerApp(App[None]):
         Binding("escape", "quit", "quit", show=False),
     ]
 
+    class SnapshotReady(Message):
+        def __init__(self, lines: list[str]) -> None:
+            super().__init__()
+            self.lines = lines
+
     def __init__(self):
         super().__init__()
-        self.source_pane, self.snapshot_file = load_meta()
-        self.snap_lines = self._load_snapshot()
+        self.source_pane, self.session_id, self.source_cwd, self.agent = load_meta()
+        self.snap_lines: list[str] = []
         self.comments: list[tuple[int, int, str]] = []
         self._editing_comment_idx: Optional[int] = None
+        self._meta_dir: str = ""
+        meta = os.environ.get("OUTPUT_COMMENT_COMPOSER_META", "")
+        if meta:
+            self._meta_dir = os.path.dirname(meta)
 
-    def _load_snapshot(self) -> list[str]:
-        if self.snapshot_file and os.path.isfile(self.snapshot_file):
-            with open(self.snapshot_file, encoding="utf-8", errors="replace") as f:
-                return f.read().splitlines()
-        return ["No snapshot available."]
+    # ------------------------------------------------------------------
+    # Async snapshot fetch
+    # ------------------------------------------------------------------
+
+    @work(thread=True)
+    def _fetch_snapshot(self) -> None:
+        lines = self._do_fetch()
+        self.post_message(self.SnapshotReady(lines))
+
+    def _do_fetch(self) -> list[str]:
+        debug_dir = os.environ.get("OCC_DEBUG_DIR", "")
+
+        def _log(msg: str) -> None:
+            if debug_dir:
+                try:
+                    with open(os.path.join(debug_dir, "bash.log"), "a") as f:
+                        f.write(f"py:{msg}\n")
+                except Exception:
+                    pass
+
+        # Strategy A: Claude Code JSONL
+        if self.agent in ("claude", "claude-code", "") and self.session_id:
+            lines = self._fetch_claude_jsonl()
+            if lines:
+                _log("strategy=claude-jsonl ok")
+                return lines
+
+        # Strategy B: OpenCode SQLite
+        opencode_db = os.path.expanduser("~/.local/share/opencode/opencode.db")
+        if os.path.isfile(opencode_db):
+            if self.session_id or self.source_cwd:
+                lines = self._fetch_opencode_sqlite(opencode_db)
+                if lines:
+                    _log("strategy=opencode-sqlite ok")
+                    return lines
+
+        # Strategy C: fallback pane read
+        _log("strategy=pane-read")
+        return self._fetch_pane_read()
+
+    def _fetch_claude_jsonl(self) -> list[str]:
+        encoded_cwd = (self.source_cwd or os.path.expanduser("~")).replace("/", "-")
+        jsonl_path = os.path.expanduser(
+            f"~/.claude/projects/{encoded_cwd}/{self.session_id}.jsonl"
+        )
+        if not os.path.isfile(jsonl_path):
+            return []
+        blocks = []
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except Exception:
+                    continue
+                if entry.get("type") != "assistant":
+                    continue
+                msg = entry.get("message", {})
+                if msg.get("role") != "assistant":
+                    continue
+                for part in msg.get("content", []):
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text = part.get("text", "").strip()
+                        if text:
+                            blocks.append(text)
+        last = blocks[-1] if blocks else ""
+        return last.splitlines() if last else []
+
+    def _fetch_opencode_sqlite(self, db_path: str) -> list[str]:
+        try:
+            conn = sqlite3.connect(db_path)
+            session_id = self.session_id or None
+
+            if not session_id and self.source_cwd:
+                row = conn.execute("""
+                    SELECT s.id FROM session s
+                    JOIN message m ON m.session_id = s.id
+                    JOIN part p ON p.message_id = m.id
+                    WHERE s.directory = ?
+                      AND json_extract(m.data, '$.role') = 'assistant'
+                      AND json_extract(p.data, '$.type') = 'text'
+                    ORDER BY s.time_updated DESC LIMIT 1
+                """, (self.source_cwd,)).fetchone()
+                if row:
+                    session_id = row[0]
+
+            if not session_id:
+                conn.close()
+                return []
+
+            rows = conn.execute("""
+                SELECT p.data
+                FROM part p
+                JOIN message m ON p.message_id = m.id
+                WHERE m.session_id = ?
+                  AND json_extract(m.data, '$.role') = 'assistant'
+                  AND json_extract(p.data, '$.type') = 'text'
+                  AND m.time_created = (
+                    SELECT MAX(m2.time_created) FROM message m2
+                    JOIN part p2 ON p2.message_id = m2.id
+                    WHERE m2.session_id = ?
+                      AND json_extract(m2.data, '$.role') = 'assistant'
+                      AND json_extract(p2.data, '$.type') = 'text'
+                  )
+                ORDER BY p.time_created ASC
+            """, (session_id, session_id)).fetchall()
+            conn.close()
+
+            parts = []
+            for (data_json,) in rows:
+                try:
+                    d = json.loads(data_json)
+                    if d.get("type") == "text" and d.get("text"):
+                        parts.append(d["text"])
+                except Exception:
+                    pass
+            text = "\n".join(parts)
+            return text.splitlines() if text else []
+        except Exception:
+            return []
+
+    def _fetch_pane_read(self) -> list[str]:
+        herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
+        result = subprocess.run(
+            [herdr, "pane", "read", self.source_pane, "--lines", "400"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return ["Failed to read pane."]
+        raw_lines = result.stdout.splitlines()
+        return self._extract_last_block(raw_lines)
+
+    def _extract_last_block(self, lines: list[str]) -> list[str]:
+        """Detect agent TUI and extract last assistant block; fallback to last 80 lines."""
+
+        def detect_agent(ls: list[str]) -> Optional[str]:
+            for line in ls:
+                if re.match(r"^\s*▣\s+.+·", line):
+                    return "opencode"
+                if re.match(r"^\s*(Sonnet|Opus|Haiku)\s+[\d.]+\s+\S+/\S+\s+\|", line):
+                    return "claude-code"
+            return None
+
+        def extract_opencode(ls: list[str]) -> list[str]:
+            status_indexes = [i for i, l in enumerate(ls) if re.match(r"^\s*▣\s+.+·", l)]
+            end = status_indexes[-1] if status_indexes else len(ls)
+            block: list[str] = []
+            for line in reversed(ls[:end]):
+                stripped = line.strip()
+                if stripped.startswith(("┃", "$", "+ Thought:", "Orchestrator ·")):
+                    break
+                if re.match(r"^[╹▀⬝]+", stripped):
+                    break
+                block.append(line)
+            block.reverse()
+            return block
+
+        def extract_claude_code(ls: list[str]) -> list[str]:
+            sep_re = re.compile(r"^─{10,}")
+            status_re = re.compile(r"^\s*(Sonnet|Opus|Haiku)\s+[\d.]+\s+\S+/\S+\s+\|")
+            end = len(ls)
+            for i in range(len(ls) - 1, -1, -1):
+                if status_re.match(ls[i]):
+                    end = i
+                    break
+            seps = [i for i in range(end) if sep_re.match(ls[i].strip())]
+            if len(seps) < 2:
+                return []
+            for idx in range(len(seps) - 1, 0, -1):
+                start = seps[idx - 1] + 1
+                finish = seps[idx]
+                block = [l for l in ls[start:finish] if l.strip() and l.strip() != "❯"]
+                if block:
+                    return ls[start:finish]
+            return []
+
+        agent_key = detect_agent(lines)
+        if agent_key == "opencode":
+            block = extract_opencode(lines)
+        elif agent_key == "claude-code":
+            block = extract_claude_code(lines)
+        else:
+            block = []
+
+        if not block:
+            block = lines[max(0, len(lines) - 80):]
+        return block
+
+    def on_snapshot_ready(self, message: SnapshotReady) -> None:
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        loader = self.query_one("#loader", LoadingIndicator)
+        viewer.snap_lines = message.lines
+        viewer._refresh_row_map()
+        loader.display = False
+        viewer.display = True
+        viewer.focus()
+        self.sub_title = f"source: {self.source_pane}"
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield SnapshotViewer(self.snap_lines, comments_ref=self.comments, id="viewer")
+        yield LoadingIndicator(id="loader")
+        yield SnapshotViewer([], comments_ref=self.comments, id="viewer")
         with Vertical(id="comment-panel"):
             yield Label("comment", id="comment-label")
             yield CommentInput("", language=None, id="comment-input", soft_wrap=True)
@@ -356,7 +577,8 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        self.sub_title = f"source: {self.source_pane}"
+        self.sub_title = f"source: {self.source_pane} · loading…"
+        self.run_worker(self._fetch_snapshot, exclusive=True)
 
     # ------------------------------------------------------------------
     # Comment panel open/close
@@ -495,10 +717,9 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def _cleanup(self) -> None:
-        if self.snapshot_file and os.path.isfile(self.snapshot_file):
+        if self._meta_dir and os.path.isdir(self._meta_dir):
             try:
-                os.unlink(self.snapshot_file)
-                os.rmdir(os.path.dirname(self.snapshot_file))
+                shutil.rmtree(self._meta_dir)
             except OSError:
                 pass
 
