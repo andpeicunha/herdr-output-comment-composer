@@ -578,7 +578,7 @@ class ComposerApp(App[None]):
 
     def on_mount(self) -> None:
         self.sub_title = f"source: {self.source_pane} · loading…"
-        self.run_worker(self._fetch_snapshot, exclusive=True)
+        self._fetch_snapshot()
 
     # ------------------------------------------------------------------
     # Comment panel open/close
