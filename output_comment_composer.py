@@ -587,8 +587,9 @@ class ComposerApp(App[None]):
         return block
 
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
+        self.snap_lines = message.lines
         viewer = self.query_one("#viewer", SnapshotViewer)
-        viewer.snap_lines = message.lines
+        viewer.snap_lines = self.snap_lines
         viewer._refresh_row_map(viewer.size.width)
         self.screen.refresh(layout=True)
         viewer.scroll_end(animate=False)
