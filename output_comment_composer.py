@@ -564,7 +564,7 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield SnapshotViewer([], comments_ref=self.comments, id="viewer")
+        yield SnapshotViewer(["Loading…"], comments_ref=self.comments, id="viewer")
         with Vertical(id="comment-panel"):
             yield Label("comment", id="comment-label")
             yield CommentInput("", language=None, id="comment-input", soft_wrap=True)
