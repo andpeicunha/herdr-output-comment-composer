@@ -282,19 +282,10 @@ Screen {
     layers: base overlay;
 }
 
-#loader {
-    height: 1fr;
-    display: block;
-    content-align: center middle;
-    color: $text-muted;
-    background: transparent;
-}
-
 #viewer {
     height: 1fr;
     border: none;
     scrollbar-gutter: stable;
-    display: none;
 }
 
 #comment-panel {
@@ -562,11 +553,9 @@ class ComposerApp(App[None]):
 
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         viewer = self.query_one("#viewer", SnapshotViewer)
-        loader = self.query_one("#loader", Label)
         viewer.snap_lines = message.lines
         viewer._refresh_row_map()
-        loader.display = False
-        viewer.display = True
+        viewer.refresh()
         viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
@@ -575,7 +564,6 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield Label("Loading…", id="loader")
         yield SnapshotViewer([], comments_ref=self.comments, id="viewer")
         with Vertical(id="comment-panel"):
             yield Label("comment", id="comment-label")
