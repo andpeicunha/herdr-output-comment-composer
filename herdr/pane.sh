@@ -173,8 +173,10 @@ WHERE m.session_id = ?
   AND json_extract(p.data, '$.type') = 'text'
   AND m.time_created = (
     SELECT MAX(m2.time_created) FROM message m2
+    JOIN part p2 ON p2.message_id = m2.id
     WHERE m2.session_id = ?
       AND json_extract(m2.data, '$.role') = 'assistant'
+      AND json_extract(p2.data, '$.type') = 'text'
   )
 ORDER BY p.time_created ASC
 """
