@@ -587,7 +587,7 @@ class ComposerApp(App[None]):
         viewer.snap_lines = message.lines
         viewer._refresh_row_map(viewer.size.width)
         self.screen.refresh(layout=True)
-        viewer.scroll_to(0, 0, animate=False)
+        viewer.scroll_end(animate=False)
         viewer.focus()
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.border_subtitle = "@andpeicunha"
