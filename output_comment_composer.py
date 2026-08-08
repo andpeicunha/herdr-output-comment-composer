@@ -553,12 +553,17 @@ class ComposerApp(App[None]):
             block = lines[max(0, len(lines) - 80):]
         return block
 
-    async def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
-        old = self.query_one("#viewer", SnapshotViewer)
-        new_viewer = SnapshotViewer(message.lines, comments_ref=self.comments, id="viewer")
-        await old.remove()
-        await self.mount(new_viewer, before=self.query_one("#comment-panel"))
-        new_viewer.focus()
+    def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        viewer.snap_lines = message.lines
+        viewer._refresh_row_map()
+        # Force ScrollView to re-query get_content_height
+        viewer.virtual_size = viewer.virtual_size.__class__(
+            viewer.virtual_size.width, len(viewer._row_map)
+        )
+        viewer.scroll_to(0, 0, animate=False)
+        viewer.refresh()
+        viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
     # ------------------------------------------------------------------
