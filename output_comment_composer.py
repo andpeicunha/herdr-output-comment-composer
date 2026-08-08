@@ -351,7 +351,7 @@ Footer {
     color: #a5b4fc;
 }
 
-Footer > .footer--key {
+FooterKey {
     background: #312e81;
     color: #c7d2fe;
 }
