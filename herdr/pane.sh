@@ -155,37 +155,65 @@ PYJSONL
 fi
 
 # Attempt strategy 1b: OpenCode SQLite
-if [ "$snapshot_source" != "jsonl" ] && [ -n "$session_id" ]; then
-  opencode_db="$HOME/.local/share/opencode/opencode.db"
-  if [ -f "$opencode_db" ] && command -v sqlite3 >/dev/null 2>&1; then
-    echo "bash:trying-opencode-sqlite session=$session_id" >> "$debug_dir/bash.log"
-    python3 - "$opencode_db" "$session_id" "$raw_snapshot_file" <<'PYOPENCODE'
-import json, subprocess, sys
+# Works with session_id (from herdr agent_session) or cwd fallback (when herdr hasn't tracked the session)
+opencode_db="$HOME/.local/share/opencode/opencode.db"
+if [ "$snapshot_source" != "jsonl" ] && [ -f "$opencode_db" ] && command -v sqlite3 >/dev/null 2>&1; then
+  _oc_lookup="${session_id:-}"
+  _oc_mode="session"
+  if [ -z "$_oc_lookup" ] && [ -n "$cwd" ]; then
+    _oc_lookup="$cwd"
+    _oc_mode="cwd"
+  fi
+  if [ -n "$_oc_lookup" ]; then
+    echo "bash:trying-opencode-sqlite mode=$_oc_mode lookup=$_oc_lookup" >> "$debug_dir/bash.log"
+    python3 - "$opencode_db" "$_oc_mode" "$_oc_lookup" "$raw_snapshot_file" <<'PYOPENCODE'
+import json, sys
 
-db_path, session_id, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+db_path, mode, lookup, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
-query = """
-SELECT p.data
-FROM part p
-JOIN message m ON p.message_id = m.id
-WHERE m.session_id = ?
-  AND json_extract(m.data, '$.role') = 'assistant'
-  AND json_extract(p.data, '$.type') = 'text'
-  AND m.time_created = (
-    SELECT MAX(m2.time_created) FROM message m2
-    JOIN part p2 ON p2.message_id = m2.id
-    WHERE m2.session_id = ?
-      AND json_extract(m2.data, '$.role') = 'assistant'
-      AND json_extract(p2.data, '$.type') = 'text'
-  )
-ORDER BY p.time_created ASC
-"""
-
+# Resolve session_id: either direct or via most-recent session for cwd
+session_id = None
 try:
     import sqlite3
     conn = sqlite3.connect(db_path)
-    rows = conn.execute(query, (session_id, session_id)).fetchall()
+    if mode == "session":
+        session_id = lookup
+    else:
+        # cwd fallback: find most-recent session with text parts in that directory
+        row = conn.execute("""
+            SELECT s.id FROM session s
+            JOIN message m ON m.session_id = s.id
+            JOIN part p ON p.message_id = m.id
+            WHERE s.directory = ?
+              AND json_extract(m.data, '$.role') = 'assistant'
+              AND json_extract(p.data, '$.type') = 'text'
+            ORDER BY s.time_updated DESC LIMIT 1
+        """, (lookup,)).fetchone()
+        if row:
+            session_id = row[0]
+
+    if not session_id:
+        conn.close()
+        sys.exit(0)
+
+    rows = conn.execute("""
+        SELECT p.data
+        FROM part p
+        JOIN message m ON p.message_id = m.id
+        WHERE m.session_id = ?
+          AND json_extract(m.data, '$.role') = 'assistant'
+          AND json_extract(p.data, '$.type') = 'text'
+          AND m.time_created = (
+            SELECT MAX(m2.time_created) FROM message m2
+            JOIN part p2 ON p2.message_id = m2.id
+            WHERE m2.session_id = ?
+              AND json_extract(m2.data, '$.role') = 'assistant'
+              AND json_extract(p2.data, '$.type') = 'text'
+          )
+        ORDER BY p.time_created ASC
+    """, (session_id, session_id)).fetchall()
     conn.close()
+
     parts = []
     for (data_json,) in rows:
         try:
@@ -200,7 +228,6 @@ try:
         if text:
             f.write("\n")
 except Exception as e:
-    import sys
     print(f"opencode-sqlite error: {e}", file=sys.stderr)
     sys.exit(1)
 PYOPENCODE
