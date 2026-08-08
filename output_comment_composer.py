@@ -553,11 +553,11 @@ class ComposerApp(App[None]):
             block = lines[max(0, len(lines) - 80):]
         return block
 
-    def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
+    async def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         old = self.query_one("#viewer", SnapshotViewer)
         new_viewer = SnapshotViewer(message.lines, comments_ref=self.comments, id="viewer")
-        old.remove()
-        self.mount(new_viewer, before=self.query_one("#comment-panel"))
+        await old.remove()
+        await self.mount(new_viewer, before=self.query_one("#comment-panel"))
         new_viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
