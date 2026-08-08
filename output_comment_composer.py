@@ -314,7 +314,8 @@ Screen {
 #viewer {
     height: 1fr;
     border: solid #3f3f46;
-    scrollbar-gutter: stable;
+    overflow-x: hidden;
+    scrollbar-size-vertical: 1;
 }
 
 #comment-panel {
