@@ -287,6 +287,7 @@ Screen {
     display: block;
     content-align: center middle;
     color: $text-muted;
+    background: transparent;
 }
 
 #viewer {
