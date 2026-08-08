@@ -557,12 +557,8 @@ class ComposerApp(App[None]):
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.snap_lines = message.lines
         viewer._refresh_row_map()
-        # Force ScrollView to re-query get_content_height
-        viewer.virtual_size = viewer.virtual_size.__class__(
-            viewer.virtual_size.width, len(viewer._row_map)
-        )
+        self.screen.refresh(layout=True)
         viewer.scroll_to(0, 0, animate=False)
-        viewer.refresh()
         viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
