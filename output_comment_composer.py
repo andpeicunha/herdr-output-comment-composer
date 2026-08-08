@@ -21,7 +21,7 @@ from textual.geometry import Size
 from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
-from textual.widgets import Footer, Label, LoadingIndicator, TextArea
+from textual.widgets import Footer, Label, TextArea
 from textual import work
 
 
@@ -285,7 +285,8 @@ Screen {
 #loader {
     height: 1fr;
     display: block;
-    background: transparent;
+    content-align: center middle;
+    color: $text-muted;
 }
 
 #viewer {
@@ -558,9 +559,9 @@ class ComposerApp(App[None]):
             block = lines[max(0, len(lines) - 80):]
         return block
 
-    def on_snapshot_ready(self, message: SnapshotReady) -> None:
+    def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         viewer = self.query_one("#viewer", SnapshotViewer)
-        loader = self.query_one("#loader", LoadingIndicator)
+        loader = self.query_one("#loader", Label)
         viewer.snap_lines = message.lines
         viewer._refresh_row_map()
         loader.display = False
@@ -573,7 +574,7 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        yield LoadingIndicator(id="loader")
+        yield Label("Loading…", id="loader")
         yield SnapshotViewer([], comments_ref=self.comments, id="viewer")
         with Vertical(id="comment-panel"):
             yield Label("comment", id="comment-label")
