@@ -71,6 +71,8 @@ class SnapshotViewer(ScrollView):
     BINDINGS = [
         Binding("j", "scroll_down_line", "Down", show=False),
         Binding("k", "scroll_up_line", "Up", show=False),
+        Binding("down", "scroll_down_line", "Down", show=False),
+        Binding("up", "scroll_up_line", "Up", show=False),
     ]
 
     def __init__(self, lines: list[str], comments_ref: list[tuple[int, int, str]] | None = None, **kwargs):
@@ -552,11 +554,11 @@ class ComposerApp(App[None]):
         return block
 
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
-        viewer = self.query_one("#viewer", SnapshotViewer)
-        viewer.snap_lines = message.lines
-        viewer._refresh_row_map()
-        viewer.refresh(layout=True)
-        viewer.focus()
+        old = self.query_one("#viewer", SnapshotViewer)
+        new_viewer = SnapshotViewer(message.lines, comments_ref=self.comments, id="viewer")
+        old.remove()
+        self.mount(new_viewer, before=self.query_one("#comment-panel"))
+        new_viewer.focus()
         self.sub_title = f"source: {self.source_pane}"
 
     # ------------------------------------------------------------------
