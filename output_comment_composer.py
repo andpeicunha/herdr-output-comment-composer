@@ -278,7 +278,7 @@ class CommentInput(TextArea):
 
 _APP_CSS = """
 Screen {
-    background: $background;
+    background: transparent;
     layers: base overlay;
 }
 
