@@ -154,6 +154,61 @@ PYJSONL
   fi
 fi
 
+# Attempt strategy 1b: OpenCode SQLite
+if [ "$snapshot_source" != "jsonl" ] && [ -n "$session_id" ]; then
+  opencode_db="$HOME/.local/share/opencode/opencode.db"
+  if [ -f "$opencode_db" ] && command -v sqlite3 >/dev/null 2>&1; then
+    echo "bash:trying-opencode-sqlite session=$session_id" >> "$debug_dir/bash.log"
+    python3 - "$opencode_db" "$session_id" "$raw_snapshot_file" <<'PYOPENCODE'
+import json, subprocess, sys
+
+db_path, session_id, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+
+query = """
+SELECT p.data
+FROM part p
+JOIN message m ON p.message_id = m.id
+WHERE m.session_id = ?
+  AND json_extract(m.data, '$.role') = 'assistant'
+  AND json_extract(p.data, '$.type') = 'text'
+  AND m.time_created = (
+    SELECT MAX(m2.time_created) FROM message m2
+    WHERE m2.session_id = ?
+      AND json_extract(m2.data, '$.role') = 'assistant'
+  )
+ORDER BY p.time_created ASC
+"""
+
+try:
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(query, (session_id, session_id)).fetchall()
+    conn.close()
+    parts = []
+    for (data_json,) in rows:
+        try:
+            d = json.loads(data_json)
+            if d.get("type") == "text" and d.get("text"):
+                parts.append(d["text"])
+        except Exception:
+            pass
+    text = "\n".join(parts)
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(text)
+        if text:
+            f.write("\n")
+except Exception as e:
+    import sys
+    print(f"opencode-sqlite error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYOPENCODE
+    if [ -s "$raw_snapshot_file" ]; then
+      snapshot_source="jsonl"
+      echo "bash:opencode-sqlite-ok" >> "$debug_dir/bash.log"
+    fi
+  fi
+fi
+
 # Fallback: herdr pane read (may scroll source pane)
 if [ "$snapshot_source" != "jsonl" ]; then
   if ! "$H" pane read "$source_pane" --lines 400 >"$raw_snapshot_file" 2>"$tmp_dir/read.err"; then
