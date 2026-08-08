@@ -703,11 +703,10 @@ class ComposerApp(App[None]):
         parts = ["Please address these comments on your previous output:"]
         for i, (s, e, comment) in enumerate(self.comments, 1):
             raw_lines = self.snap_lines[s : e + 1]
-            quoted_lines = [line for line in raw_lines if line.strip()]
-            if quoted_lines:
-                quote = "\n".join(f"> {line}" for line in quoted_lines)
+            if raw_lines:
+                quote = "\n".join(f"> {line}" if line.strip() else ">" for line in raw_lines)
             else:
-                quote = f"> [linha {s + 1}" + (f"–{e + 1}" if e != s else "") + ": conteúdo em branco no snapshot]"
+                quote = f"> [linha {s + 1}" + (f"–{e + 1}" if e != s else "") + ": fora do snapshot]"
             parts.append(
                 f"Comment {i} on lines {s + 1}–{e + 1}:\n\n"
                 f"{quote}\n\n"
