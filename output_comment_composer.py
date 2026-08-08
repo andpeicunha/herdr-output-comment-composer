@@ -309,7 +309,7 @@ Screen {
 
 #viewer {
     height: 1fr;
-    border: none;
+    border: solid #3f3f46;
     scrollbar-gutter: stable;
 }
 
@@ -360,7 +360,7 @@ FooterKey {
 
 class ComposerApp(App[None]):
     CSS = _APP_CSS
-    TITLE = "output-comment-composer · @andpeicunha"
+    TITLE = "output-comment-composer"
 
     BINDINGS = [
         Binding("c", "open_comment", "comment", show=True),
@@ -588,7 +588,8 @@ class ComposerApp(App[None]):
         self.screen.refresh(layout=True)
         viewer.scroll_to(0, 0, animate=False)
         viewer.focus()
-        self.sub_title = f"source: {self.source_pane}"
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        viewer.border_subtitle = "@andpeicunha"
 
     # ------------------------------------------------------------------
     # Layout
@@ -607,7 +608,9 @@ class ComposerApp(App[None]):
     # ------------------------------------------------------------------
 
     def on_mount(self) -> None:
-        self.sub_title = f"source: {self.source_pane} · loading…"
+        viewer = self.query_one("#viewer", SnapshotViewer)
+        viewer.border_title = f"source: {self.source_pane}"
+        viewer.border_subtitle = "@andpeicunha · loading…"
         self._fetch_snapshot()
 
     # ------------------------------------------------------------------
@@ -671,7 +674,8 @@ class ComposerApp(App[None]):
                     severity="information",
                 )
 
-            self.sub_title = f"source: {self.source_pane} · {len(self.comments)} comment(s)"
+            viewer = self.query_one("#viewer", SnapshotViewer)
+            viewer.border_subtitle = f"@andpeicunha · {len(self.comments)} comment(s)"
             viewer._refresh_row_map()
             viewer.refresh()
 
