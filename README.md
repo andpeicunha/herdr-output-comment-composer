@@ -4,6 +4,8 @@ A [Herdr](https://herdr.io) plugin for annotating your AI agent's output inline.
 
 Opens a frozen snapshot of the agent's last response in a zoomed TUI pane. Select lines, add comments, and send them back as a structured prompt — without losing context or scrolling your session.
 
+![alt text](image.png)
+
 ## Features
 
 - Captures the last assistant response via Claude Code JSONL session logs (no terminal scroll)
