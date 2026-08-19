@@ -71,6 +71,38 @@ action = { plugin = "andpeicunha.output-comment-composer", action_id = "toggle" 
 3. You select lines and type comments
 4. On `s`, the plugin sends a structured prompt back to the original agent pane
 
+### Privacy and data flow
+
+The plugin does not call an external API or upload the captured response by
+itself. It reads local session data or the local Herdr pane, displays a frozen
+snapshot, and sends the resulting comment prompt back through Herdr to the
+agent pane. The agent or tools configured by the user may have their own
+network access; that behavior is outside this plugin.
+
+The plugin may read:
+
+- Claude Code session files under `~/.claude/projects/`;
+- the local OpenCode database under `~/.local/share/opencode/`;
+- the current Herdr pane output.
+
+Do not use it on a session containing information you are not allowed to expose
+to the configured agent.
+
+## Status and limitations
+
+This is an early open-source plugin for Herdr. The core prompt-building path
+has a basic unit test, but the Textual UI and integrations with Claude Code,
+OpenCode, and Herdr still require manual validation in a real session.
+
+Known limitations:
+
+- snapshot extraction depends on the output formats of the supported agents;
+- the fallback for unknown agents is limited to the last 80 pane lines;
+- Python 3, Textual, Herdr, and `jq` must be available in the runtime
+  environment;
+- dependency installation may require a user-managed Python environment on
+  systems that enforce PEP 668.
+
 ## Supported agents
 
 | Agent | Snapshot source |
