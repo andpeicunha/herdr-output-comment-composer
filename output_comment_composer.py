@@ -31,6 +31,7 @@ _CLAUDE_MODE_RE = re.compile(
     r"\b(?:bypass permissions|accept edits|plan mode)\s+on\b.*\bshift\+tab\b",
     re.IGNORECASE,
 )
+_CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
 
 
 def _is_agent_status_line(line: str) -> bool:
@@ -43,16 +44,29 @@ def _is_agent_status_line(line: str) -> bool:
 
 
 def clean_snapshot_lines(lines: list[str]) -> list[str]:
-    """Remove agent UI status footers from the end of a pane snapshot."""
+    """Remove agent UI prompt/status footers from the end of a pane snapshot."""
     cleaned = list(lines)
-    end = len(cleaned)
-    while end > 0 and not cleaned[end - 1].strip():
-        end -= 1
 
-    if end > 0 and _is_agent_status_line(cleaned[end - 1]):
-        del cleaned[end - 1]
+    while True:
         while cleaned and not cleaned[-1].strip():
             cleaned.pop()
+
+        if cleaned and _is_agent_status_line(cleaned[-1]):
+            cleaned.pop()
+            continue
+
+        plain = _ANSI_ESCAPE_RE.sub("", cleaned[-1]).strip() if cleaned else ""
+        if cleaned and _CODEX_PROMPT_RE.match(plain):
+            cleaned.pop()
+            # Codex draws blank/decorative separator rows above its prompt.
+            while cleaned:
+                plain = _ANSI_ESCAPE_RE.sub("", cleaned[-1]).strip()
+                if plain and re.search(r"\w", plain, re.UNICODE):
+                    break
+                cleaned.pop()
+            continue
+
+        break
 
     return cleaned
 

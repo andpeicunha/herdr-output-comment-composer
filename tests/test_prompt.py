@@ -18,6 +18,21 @@ class CleanSnapshotLinesTests(unittest.TestCase):
 
         self.assertEqual(clean_snapshot_lines(lines), ["Resposta final"])
 
+    def test_removes_trailing_codex_prompt_block(self):
+        lines = [
+            "Depois, use prefix + r para recarregar o Herdr.",
+            "",
+            "────────────────────────────────────────────────────────",
+            "  ↳  ───────",
+            "",
+            "› Ask Codex to do anything",
+        ]
+
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Depois, use prefix + r para recarregar o Herdr."],
+        )
+
     def test_preserves_similar_content_inside_response(self):
         lines = [
             "Context 13% used · weekly 98% left",
