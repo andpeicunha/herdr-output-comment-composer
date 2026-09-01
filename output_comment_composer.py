@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -21,6 +22,39 @@ from textual.scroll_view import ScrollView
 from textual.strip import Strip
 from textual.widgets import Footer, Label, TextArea
 from textual import work
+
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+_CODEX_STATUS_RE = re.compile(r"\bcontext\s+\d+%\s+used\b", re.IGNORECASE)
+_CODEX_LIMIT_RE = re.compile(r"\b(?:weekly|(?:\d+h))\s+\d+%\s+left\b", re.IGNORECASE)
+_CLAUDE_MODE_RE = re.compile(
+    r"\b(?:bypass permissions|accept edits|plan mode)\s+on\b.*\bshift\+tab\b",
+    re.IGNORECASE,
+)
+
+
+def _is_agent_status_line(line: str) -> bool:
+    """Return whether a terminal line is a known Codex/Claude status footer."""
+    plain = _ANSI_ESCAPE_RE.sub("", line).strip()
+    return bool(
+        (_CODEX_STATUS_RE.search(plain) and _CODEX_LIMIT_RE.search(plain))
+        or _CLAUDE_MODE_RE.search(plain)
+    )
+
+
+def clean_snapshot_lines(lines: list[str]) -> list[str]:
+    """Remove agent UI status footers from the end of a pane snapshot."""
+    cleaned = list(lines)
+    end = len(cleaned)
+    while end > 0 and not cleaned[end - 1].strip():
+        end -= 1
+
+    if end > 0 and _is_agent_status_line(cleaned[end - 1]):
+        del cleaned[end - 1]
+        while cleaned and not cleaned[-1].strip():
+            cleaned.pop()
+
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +441,7 @@ class ComposerApp(App[None]):
         )
         if result.returncode != 0:
             return ["Failed to read pane."]
-        return result.stdout.splitlines()
+        return clean_snapshot_lines(result.stdout.splitlines())
 
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         self.snap_lines = message.lines

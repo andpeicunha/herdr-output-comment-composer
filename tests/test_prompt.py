@@ -1,6 +1,30 @@
 import unittest
 
-from output_comment_composer import ComposerApp
+from output_comment_composer import ComposerApp, clean_snapshot_lines
+
+
+class CleanSnapshotLinesTests(unittest.TestCase):
+    def test_removes_trailing_codex_status_line(self):
+        lines = [
+            "Nenhum arquivo foi alterado.",
+            "",
+            "gpt-5.6-sol low · ~/Apps/ahkta-core · Context 13% used · 5h 98% left · weekly 98% left · 0.152.0",
+        ]
+
+        self.assertEqual(clean_snapshot_lines(lines), ["Nenhum arquivo foi alterado."])
+
+    def test_removes_trailing_claude_mode_status_line(self):
+        lines = ["Resposta final", "⏵⏵ bypass permissions on (shift+tab to cycle)"]
+
+        self.assertEqual(clean_snapshot_lines(lines), ["Resposta final"])
+
+    def test_preserves_similar_content_inside_response(self):
+        lines = [
+            "Context 13% used · weekly 98% left",
+            "Esta linha faz parte da resposta.",
+        ]
+
+        self.assertEqual(clean_snapshot_lines(lines), lines)
 
 
 class BuildPromptTests(unittest.TestCase):
