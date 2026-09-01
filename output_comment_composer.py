@@ -31,6 +31,10 @@ _CLAUDE_MODE_RE = re.compile(
     r"\b(?:bypass permissions|accept edits|plan mode)\s+on\b.*\bshift\+tab\b",
     re.IGNORECASE,
 )
+_CLAUDE_COMPOSER_STATUS_RE = re.compile(
+    r"\b(?:manual|normal|plan|accept edits|bypass permissions)\s+mode\s+on\b.*\bfor agents\b",
+    re.IGNORECASE,
+)
 _CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
 
 
@@ -56,6 +60,21 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
             continue
 
         plain = _ANSI_ESCAPE_RE.sub("", cleaned[-1]).strip() if cleaned else ""
+        if cleaned and _CLAUDE_COMPOSER_STATUS_RE.search(plain):
+            # The Claude composer starts at its /effort selector. Limit the
+            # backward search so response text containing /effort is safe.
+            footer_start = None
+            for index in range(len(cleaned) - 1, max(-1, len(cleaned) - 12), -1):
+                candidate = _ANSI_ESCAPE_RE.sub("", cleaned[index]).strip()
+                if re.search(r"(?:^|\s)/effort(?:\s|$)", candidate, re.IGNORECASE):
+                    footer_start = index
+                    break
+            if footer_start is None:
+                cleaned.pop()
+            else:
+                del cleaned[footer_start:]
+            continue
+
         if cleaned and _CODEX_PROMPT_RE.match(plain):
             cleaned.pop()
             # Codex draws blank/decorative separator rows above its prompt.

@@ -18,6 +18,20 @@ class CleanSnapshotLinesTests(unittest.TestCase):
 
         self.assertEqual(clean_snapshot_lines(lines), ["Resposta final"])
 
+    def test_removes_trailing_claude_composer_block(self):
+        lines = [
+            "Resposta final do Claude.",
+            "",
+            "  · /effort                                      ○ low",
+            "────────────────────────────────────────────────────────",
+            "  ❯",
+            "────────────────────────────────────────────────────────",
+            "  Sonnet 5 dotfiles/main",
+            "  ⏸ manual mode on · ← for agents",
+        ]
+
+        self.assertEqual(clean_snapshot_lines(lines), ["Resposta final do Claude."])
+
     def test_removes_trailing_codex_prompt_block(self):
         lines = [
             "Depois, use prefix + r para recarregar o Herdr.",
