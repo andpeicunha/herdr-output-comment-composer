@@ -468,7 +468,16 @@ class ComposerApp(App[None]):
     def _fetch_pane_read(self) -> list[str]:
         herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
         result = subprocess.run(
-            [herdr, "pane", "read", self.source_pane, "--lines", "500"],
+            [
+                herdr,
+                "pane",
+                "read",
+                self.source_pane,
+                "--source",
+                "recent-unwrapped",
+                "--lines",
+                "500",
+            ],
             capture_output=True,
             text=True,
         )

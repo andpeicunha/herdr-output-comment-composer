@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from output_comment_composer import ComposerApp, clean_snapshot_lines
 
@@ -66,6 +67,21 @@ class BuildPromptTests(unittest.TestCase):
 
         self.assertIn("> first line\n>\n> third line", prompt)
         self.assertIn("Comment:\nPlease clarify this", prompt)
+
+
+class FetchPaneReadTests(unittest.TestCase):
+    @patch("output_comment_composer.subprocess.run")
+    def test_fetches_logical_unwrapped_lines(self, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "Uma linha longa sem quebra física.\n"
+        app = ComposerApp.__new__(ComposerApp)
+        app.source_pane = "pane-123"
+
+        lines = app._fetch_pane_read()
+
+        self.assertEqual(lines, ["Uma linha longa sem quebra física."])
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--source") + 1], "recent-unwrapped")
 
 
 if __name__ == "__main__":
