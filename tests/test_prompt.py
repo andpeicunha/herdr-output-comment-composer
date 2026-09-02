@@ -49,6 +49,30 @@ class CleanSnapshotLinesTests(unittest.TestCase):
             ["Próximo passo: perguntar ao time de plataforma."],
         )
 
+    def test_detects_claude_composer_by_prompt_boundaries_without_update_banner(self):
+        lines = [
+            "Resposta válida.",
+            "────────────────────────────────────────────────────────",
+            "› próximo pedido do usuário",
+            "────────────────────────────────────────────────────────",
+            "orchestrator·Opus | Cont 31% | 5h 55%",
+            "  ⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        ]
+
+        self.assertEqual(clean_snapshot_lines(lines), ["Resposta válida."])
+
+    def test_does_not_treat_an_unbounded_prompt_like_response_as_composer(self):
+        lines = [
+            "Resposta válida.",
+            "› este exemplo pertence ao conteúdo",
+            "  ⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        ]
+
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Resposta válida.", "› este exemplo pertence ao conteúdo"],
+        )
+
     def test_removes_trailing_codex_prompt_block(self):
         lines = [
             "Depois, use prefix + r para recarregar o Herdr.",

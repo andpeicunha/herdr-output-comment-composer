@@ -40,6 +40,12 @@ _CLAUDE_PROMPT_RE = re.compile(r"^[›❯>]\s*\S")
 _CLAUDE_UPDATE_RE = re.compile(r"\bupdate installed\b.*\brestart to update\b", re.IGNORECASE)
 
 
+def _is_horizontal_separator(line: str) -> bool:
+    """Return whether a line is a terminal composer horizontal boundary."""
+    plain = _ANSI_ESCAPE_RE.sub("", line).strip().replace(" ", "")
+    return len(plain) >= 10 and all(char in "─━—-_═" for char in plain)
+
+
 def _is_agent_status_line(line: str) -> bool:
     """Return whether a terminal line is a known Codex/Claude status footer."""
     plain = _ANSI_ESCAPE_RE.sub("", line).strip()
@@ -71,14 +77,16 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
                 if re.search(r"(?:^|\s)/effort(?:\s|$)", candidate, re.IGNORECASE):
                     footer_start = index
                     break
-                if _CLAUDE_PROMPT_RE.match(candidate):
-                    footer_start = index
-                    # Include the separator immediately above the prompt and
-                    # Claude's optional update notification above that.
-                    if footer_start > 0 and not re.search(
-                        r"\w", _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1]), re.UNICODE
-                    ):
-                        footer_start -= 1
+                if (
+                    _CLAUDE_PROMPT_RE.match(candidate)
+                    and index > 0
+                    and index + 1 < len(cleaned)
+                    and _is_horizontal_separator(cleaned[index - 1])
+                    and _is_horizontal_separator(cleaned[index + 1])
+                ):
+                    # The paired rules surrounding the prompt define the
+                    # composer. An update banner immediately above is optional.
+                    footer_start = index - 1
                     if footer_start > 0 and _CLAUDE_UPDATE_RE.search(
                         _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1])
                     ):
