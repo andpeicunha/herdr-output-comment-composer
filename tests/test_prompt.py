@@ -175,6 +175,17 @@ class SnapshotViewerFocusTests(unittest.TestCase):
         self.assertTrue(viewer.scroll_to_region.call_args.kwargs["center"])
         self.assertFalse(viewer.scroll_to_region.call_args.kwargs["x_axis"])
 
+    def test_mouse_selection_requests_comment_editor(self):
+        viewer = SnapshotViewer(["primeira", "segunda"], [])
+        viewer.sel_start = 0
+        viewer.sel_end = 1
+        viewer.post_message = unittest.mock.Mock()
+
+        viewer._request_comment_for_selection()
+
+        message = viewer.post_message.call_args.args[0]
+        self.assertIsInstance(message, SnapshotViewer.SelectionCompleted)
+
 
 if __name__ == "__main__":
     unittest.main()

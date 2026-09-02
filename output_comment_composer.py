@@ -165,6 +165,9 @@ _SELECTED_STYLE = Style(bgcolor=_SELECTED_BG.rich_color)
 class SnapshotViewer(ScrollView):
     """Scrollable line viewer with mouse-drag selection."""
 
+    class SelectionCompleted(Message):
+        """Posted when a mouse selection is ready to be annotated."""
+
     BINDINGS = [
         Binding("j", "scroll_down_line", "Down", show=False),
         Binding("k", "scroll_up_line", "Up", show=False),
@@ -344,6 +347,11 @@ class SnapshotViewer(ScrollView):
         self._drag_anchor = None
         self.refresh()
         event.stop()
+        self._request_comment_for_selection()
+
+    def _request_comment_for_selection(self) -> None:
+        if self.has_selection():
+            self.post_message(self.SelectionCompleted())
 
     # ------------------------------------------------------------------
     # Keyboard scroll helpers
@@ -622,6 +630,12 @@ class ComposerApp(App[None]):
         if existing_text:
             inp.insert(existing_text)
         inp.focus()
+
+    def on_snapshot_viewer_selection_completed(
+        self, _message: SnapshotViewer.SelectionCompleted
+    ) -> None:
+        """Open the editor immediately after a mouse selection."""
+        self.action_open_comment()
 
     def save_comment(self) -> None:
         viewer = self.query_one("#viewer", SnapshotViewer)
