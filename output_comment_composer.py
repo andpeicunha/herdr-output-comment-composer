@@ -362,6 +362,34 @@ class SnapshotViewer(ScrollView):
     def has_selection(self) -> bool:
         return self.sel_start is not None and self.sel_end is not None
 
+    def _selection_target_row(self) -> Optional[int]:
+        """Return the row containing the selected line's annotation or text."""
+        if self.sel_end is None:
+            return None
+        line_rows = [
+            index
+            for index, (kind, value) in enumerate(self._row_map)
+            if kind == "line_chunk" and value[0] == self.sel_end
+        ]
+        if not line_rows:
+            return None
+        last_line_row = line_rows[-1]
+        annotation_row = last_line_row + 1
+        if (
+            annotation_row < len(self._row_map)
+            and self._row_map[annotation_row][0] == "annotation"
+        ):
+            return annotation_row
+        return last_line_row
+
+    def scroll_selection_into_view(self) -> None:
+        """Center the selected line/comment after the editor closes."""
+        target_row = self._selection_target_row()
+        if target_row is None:
+            return
+        target_y = max(0, target_row - max(1, self.size.height) // 2)
+        self.scroll_to(y=target_y, animate=False, force=True, immediate=True)
+
     def selection_label(self) -> str:
         if not self.has_selection():
             return ""
@@ -622,12 +650,13 @@ class ComposerApp(App[None]):
 
             viewer = self.query_one("#viewer", SnapshotViewer)
             viewer.border_subtitle = f"@andpeicunha · {len(self.comments)} comment(s)"
-            viewer._refresh_row_map()
-            viewer.refresh()
+            viewer._refresh_row_map(viewer.size.width)
+            viewer.refresh(layout=True)
 
         panel.remove_class("visible")
         inp.clear()
         viewer.focus()
+        self.call_after_refresh(viewer.scroll_selection_into_view)
 
     def cancel_comment(self) -> None:
         panel = self.query_one("#comment-panel")

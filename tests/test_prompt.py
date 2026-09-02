@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from output_comment_composer import ComposerApp, clean_snapshot_lines
+from output_comment_composer import ComposerApp, SnapshotViewer, clean_snapshot_lines
 
 
 class CleanSnapshotLinesTests(unittest.TestCase):
@@ -137,6 +137,30 @@ class FetchPaneReadTests(unittest.TestCase):
         self.assertEqual(lines, ["Uma linha longa sem quebra física."])
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--source") + 1], "recent-unwrapped")
+
+
+class SnapshotViewerFocusTests(unittest.TestCase):
+    def test_targets_saved_annotation_after_selected_line(self):
+        comments = [(1, 1, "Revise este ponto")]
+        viewer = SnapshotViewer(["primeira", "segunda", "terceira"], comments)
+        viewer.sel_start = 1
+        viewer.sel_end = 1
+
+        target = viewer._selection_target_row()
+
+        self.assertIsNotNone(target)
+        self.assertEqual(viewer._row_map[target][0], "annotation")
+
+    def test_targets_selected_text_when_comment_was_deleted(self):
+        viewer = SnapshotViewer(["primeira", "segunda", "terceira"], [])
+        viewer.sel_start = 1
+        viewer.sel_end = 1
+
+        target = viewer._selection_target_row()
+
+        self.assertIsNotNone(target)
+        self.assertEqual(viewer._row_map[target][0], "line_chunk")
+        self.assertEqual(viewer._row_map[target][1][0], 1)
 
 
 if __name__ == "__main__":
