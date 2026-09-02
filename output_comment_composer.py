@@ -131,6 +131,40 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
     return cleaned
 
 
+_MARKDOWN_BLOCK_RE = re.compile(r"^(?:[-*+]\s|\d+[.)]\s|>|#{1,6}\s|```|~~~)")
+_SENTENCE_END_RE = re.compile(r"[.!?;:]\s*$")
+
+
+def reflow_wrapped_prose(lines: list[str]) -> list[str]:
+    """Join terminal hard-wrap continuations while preserving Markdown blocks."""
+    reflowed: list[str] = []
+    in_fence = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(("```", "~~~")):
+            in_fence = not in_fence
+            reflowed.append(line)
+            continue
+
+        previous = reflowed[-1] if reflowed else ""
+        should_join = bool(
+            not in_fence
+            and line[:1].isspace()
+            and stripped
+            and previous.strip()
+            and len(previous.rstrip()) >= 40
+            and not _SENTENCE_END_RE.search(previous)
+            and not _MARKDOWN_BLOCK_RE.match(stripped)
+        )
+        if should_join:
+            reflowed[-1] = f"{previous.rstrip()} {stripped}"
+        else:
+            reflowed.append(line)
+
+    return reflowed
+
+
 # ---------------------------------------------------------------------------
 # Metadata loading
 # ---------------------------------------------------------------------------
@@ -566,7 +600,8 @@ class ComposerApp(App[None]):
         )
         if result.returncode != 0:
             return ["Failed to read pane."]
-        return clean_snapshot_lines(result.stdout.splitlines())
+        lines = clean_snapshot_lines(result.stdout.splitlines())
+        return reflow_wrapped_prose(lines)
 
     def on_composer_app_snapshot_ready(self, message: SnapshotReady) -> None:
         self.snap_lines = message.lines

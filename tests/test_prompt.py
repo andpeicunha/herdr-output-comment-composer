@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from output_comment_composer import ComposerApp, SnapshotViewer, clean_snapshot_lines
+from output_comment_composer import (
+    ComposerApp,
+    SnapshotViewer,
+    clean_snapshot_lines,
+    reflow_wrapped_prose,
+)
 
 
 class CleanSnapshotLinesTests(unittest.TestCase):
@@ -137,6 +142,36 @@ class FetchPaneReadTests(unittest.TestCase):
         self.assertEqual(lines, ["Uma linha longa sem quebra física."])
         command = run.call_args.args[0]
         self.assertEqual(command[command.index("--source") + 1], "recent-unwrapped")
+
+
+class ReflowWrappedProseTests(unittest.TestCase):
+    def test_joins_indented_hard_wraps_in_same_paragraph(self):
+        lines = [
+            "A maior decisão de produto é se a aula cancelada deve desaparecer ou está sendo",
+            "    chamada de Excluir, preservando internamente a ocorrência cancelada para",
+            "    histórico e futuras reservas.",
+        ]
+
+        self.assertEqual(
+            reflow_wrapped_prose(lines),
+            [
+                "A maior decisão de produto é se a aula cancelada deve desaparecer ou está sendo "
+                "chamada de Excluir, preservando internamente a ocorrência cancelada para histórico "
+                "e futuras reservas."
+            ],
+        )
+
+    def test_preserves_lists_paragraphs_and_fenced_code(self):
+        lines = [
+            "Uma introdução suficientemente longa que termina sem pontuação para continuar",
+            "  - item separado",
+            "",
+            "```python",
+            "    print('não juntar')",
+            "```",
+        ]
+
+        self.assertEqual(reflow_wrapped_prose(lines), lines)
 
 
 class SnapshotViewerFocusTests(unittest.TestCase):
