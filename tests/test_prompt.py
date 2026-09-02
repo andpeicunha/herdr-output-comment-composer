@@ -33,6 +33,22 @@ class CleanSnapshotLinesTests(unittest.TestCase):
 
         self.assertEqual(clean_snapshot_lines(lines), ["Resposta final do Claude."])
 
+    def test_removes_trailing_claude_auto_mode_composer_block(self):
+        lines = [
+            "Próximo passo: perguntar ao time de plataforma.",
+            "✓ Update installed · Restart to update",
+            "────────────────────────────────────────────────────────",
+            "› sim, monta a mensagem pro time de plataforma",
+            "────────────────────────────────────────────────────────",
+            "orchestrator·Sonnet 5 | Cont 28% | 5h 43% | 7d 12%",
+            "  ⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        ]
+
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Próximo passo: perguntar ao time de plataforma."],
+        )
+
     def test_removes_trailing_codex_prompt_block(self):
         lines = [
             "Depois, use prefix + r para recarregar o Herdr.",

@@ -32,10 +32,12 @@ _CLAUDE_MODE_RE = re.compile(
     re.IGNORECASE,
 )
 _CLAUDE_COMPOSER_STATUS_RE = re.compile(
-    r"\b(?:manual|normal|plan|accept edits|bypass permissions)\s+mode\s+on\b.*\bfor agents\b",
+    r"\b(?:auto|manual|normal|plan|accept edits|bypass permissions)\s+mode\s+on\b.*\bfor agents\b",
     re.IGNORECASE,
 )
 _CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
+_CLAUDE_PROMPT_RE = re.compile(r"^[›❯>]\s*\S")
+_CLAUDE_UPDATE_RE = re.compile(r"\bupdate installed\b.*\brestart to update\b", re.IGNORECASE)
 
 
 def _is_agent_status_line(line: str) -> bool:
@@ -61,13 +63,26 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
 
         plain = _ANSI_ESCAPE_RE.sub("", cleaned[-1]).strip() if cleaned else ""
         if cleaned and _CLAUDE_COMPOSER_STATUS_RE.search(plain):
-            # The Claude composer starts at its /effort selector. Limit the
-            # backward search so response text containing /effort is safe.
+            # Locate the start of either Claude composer layout. Limit the
+            # search so response text containing these tokens remains safe.
             footer_start = None
             for index in range(len(cleaned) - 1, max(-1, len(cleaned) - 12), -1):
                 candidate = _ANSI_ESCAPE_RE.sub("", cleaned[index]).strip()
                 if re.search(r"(?:^|\s)/effort(?:\s|$)", candidate, re.IGNORECASE):
                     footer_start = index
+                    break
+                if _CLAUDE_PROMPT_RE.match(candidate):
+                    footer_start = index
+                    # Include the separator immediately above the prompt and
+                    # Claude's optional update notification above that.
+                    if footer_start > 0 and not re.search(
+                        r"\w", _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1]), re.UNICODE
+                    ):
+                        footer_start -= 1
+                    if footer_start > 0 and _CLAUDE_UPDATE_RE.search(
+                        _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1])
+                    ):
+                        footer_start -= 1
                     break
             if footer_start is None:
                 cleaned.pop()
