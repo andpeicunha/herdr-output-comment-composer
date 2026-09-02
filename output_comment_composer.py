@@ -16,7 +16,7 @@ from textual.binding import Binding
 from textual.color import Color
 from textual.containers import Vertical
 from textual.events import Key, MouseDown, MouseMove, MouseUp
-from textual.geometry import Size
+from textual.geometry import Region, Size
 from textual.message import Message
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
@@ -387,8 +387,14 @@ class SnapshotViewer(ScrollView):
         target_row = self._selection_target_row()
         if target_row is None:
             return
-        target_y = max(0, target_row - max(1, self.size.height) // 2)
-        self.scroll_to(y=target_y, animate=False, force=True, immediate=True)
+        self.scroll_to_region(
+            Region(0, target_row, max(1, self.size.width), 1),
+            center=True,
+            animate=False,
+            force=True,
+            immediate=True,
+            x_axis=False,
+        )
 
     def selection_label(self) -> str:
         if not self.has_selection():
@@ -656,6 +662,14 @@ class ComposerApp(App[None]):
         panel.remove_class("visible")
         inp.clear()
         viewer.focus()
+        # Closing the panel resizes the viewer asynchronously. Wait for that
+        # layout pass, rebuild against the final dimensions, then scroll on a
+        # second refresh so the resize cannot overwrite the target offset.
+        self.call_after_refresh(self._restore_saved_comment_position, viewer)
+
+    def _restore_saved_comment_position(self, viewer: SnapshotViewer) -> None:
+        viewer._refresh_row_map(viewer.size.width)
+        viewer.refresh(layout=True)
         self.call_after_refresh(viewer.scroll_selection_into_view)
 
     def cancel_comment(self) -> None:

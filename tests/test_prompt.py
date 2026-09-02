@@ -162,6 +162,19 @@ class SnapshotViewerFocusTests(unittest.TestCase):
         self.assertEqual(viewer._row_map[target][0], "line_chunk")
         self.assertEqual(viewer._row_map[target][1][0], 1)
 
+    def test_centers_saved_annotation_region(self):
+        comments = [(1, 1, "Revise este ponto")]
+        viewer = SnapshotViewer(["primeira", "segunda", "terceira"], comments)
+        viewer.sel_start = 1
+        viewer.sel_end = 1
+        viewer.scroll_to_region = unittest.mock.Mock()
+
+        viewer.scroll_selection_into_view()
+
+        viewer.scroll_to_region.assert_called_once()
+        self.assertTrue(viewer.scroll_to_region.call_args.kwargs["center"])
+        self.assertFalse(viewer.scroll_to_region.call_args.kwargs["x_axis"])
+
 
 if __name__ == "__main__":
     unittest.main()
