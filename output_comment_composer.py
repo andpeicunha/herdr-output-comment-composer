@@ -35,8 +35,12 @@ _CLAUDE_COMPOSER_STATUS_RE = re.compile(
     r"\b(?:auto|manual|normal|plan|accept edits|bypass permissions)\s+mode\s+on\b.*\bfor agents\b",
     re.IGNORECASE,
 )
+_CLAUDE_CONTEXT_STATUS_RE = re.compile(
+    r"\borchestrator\b.*\bcont\b.*\d+%.*\b5h\b.*\d+%",
+    re.IGNORECASE,
+)
 _CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
-_CLAUDE_PROMPT_RE = re.compile(r"^[›❯>]\s*\S")
+_CLAUDE_PROMPT_RE = re.compile(r"^[›❯>](?:\s.*)?$")
 _CLAUDE_UPDATE_RE = re.compile(r"\bupdate installed\b.*\brestart to update\b", re.IGNORECASE)
 
 
@@ -68,7 +72,10 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
             continue
 
         plain = _ANSI_ESCAPE_RE.sub("", cleaned[-1]).strip() if cleaned else ""
-        if cleaned and _CLAUDE_COMPOSER_STATUS_RE.search(plain):
+        if cleaned and (
+            _CLAUDE_COMPOSER_STATUS_RE.search(plain)
+            or _CLAUDE_CONTEXT_STATUS_RE.search(plain)
+        ):
             # Locate the start of either Claude composer layout. Limit the
             # search so response text containing these tokens remains safe.
             footer_start = None
@@ -77,20 +84,31 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
                 if re.search(r"(?:^|\s)/effort(?:\s|$)", candidate, re.IGNORECASE):
                     footer_start = index
                     break
-                if (
-                    _CLAUDE_PROMPT_RE.match(candidate)
-                    and index > 0
-                    and index + 1 < len(cleaned)
-                    and _is_horizontal_separator(cleaned[index - 1])
-                    and _is_horizontal_separator(cleaned[index + 1])
-                ):
-                    # The paired rules surrounding the prompt define the
-                    # composer. An update banner immediately above is optional.
-                    footer_start = index - 1
-                    if footer_start > 0 and _CLAUDE_UPDATE_RE.search(
-                        _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1])
-                    ):
-                        footer_start -= 1
+                if not _is_horizontal_separator(cleaned[index]):
+                    continue
+                for upper in range(index - 1, max(-1, index - 5), -1):
+                    if not _is_horizontal_separator(cleaned[upper]):
+                        continue
+                    between = [
+                        _ANSI_ESCAPE_RE.sub("", line).strip()
+                        for line in cleaned[upper + 1 : index]
+                    ]
+                    if any(_CLAUDE_PROMPT_RE.match(line) for line in between):
+                        # The paired rules define the composer even when its
+                        # prompt is empty or preceded by an orchestrator label.
+                        footer_start = upper
+                        if footer_start > 0 and re.search(
+                            r"(?:^|\s)/effort(?:\s|$)",
+                            _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1]),
+                            re.IGNORECASE,
+                        ):
+                            footer_start -= 1
+                        if footer_start > 0 and _CLAUDE_UPDATE_RE.search(
+                            _ANSI_ESCAPE_RE.sub("", cleaned[footer_start - 1])
+                        ):
+                            footer_start -= 1
+                        break
+                if footer_start is not None:
                     break
             if footer_start is None:
                 cleaned.pop()

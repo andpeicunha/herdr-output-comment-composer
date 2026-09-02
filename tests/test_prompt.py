@@ -61,6 +61,21 @@ class CleanSnapshotLinesTests(unittest.TestCase):
 
         self.assertEqual(clean_snapshot_lines(lines), ["Resposta válida."])
 
+    def test_removes_claude_empty_prompt_with_context_meter(self):
+        lines = [
+            "Quer que eu rode os testes e suba a PR?",
+            "────────────────────────────────────────────────────────",
+            "orchestrator —",
+            "❯",
+            "────────────────────────────────────────────────────────",
+            "orchestrator·Sonnet 5 | Cont 30% | 5h 48% | 7d 12%",
+        ]
+
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Quer que eu rode os testes e suba a PR?"],
+        )
+
     def test_does_not_treat_an_unbounded_prompt_like_response_as_composer(self):
         lines = [
             "Resposta válida.",
