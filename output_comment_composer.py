@@ -39,9 +39,16 @@ _CLAUDE_CONTEXT_STATUS_RE = re.compile(
     r"\borchestrator\b.*\bcont\b.*\d+%.*\b5h\b.*\d+%",
     re.IGNORECASE,
 )
+_CLAUDE_ORCHESTRATOR_LABEL_RE = re.compile(r"^orchestrator\b", re.IGNORECASE)
 _CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
 _CLAUDE_PROMPT_RE = re.compile(r"^[›❯>](?:\s.*)?$")
 _CLAUDE_UPDATE_RE = re.compile(r"\bupdate installed\b.*\brestart to update\b", re.IGNORECASE)
+
+
+def _has_box_drawing_chars(text: str) -> bool:
+    """Return whether a text contains box-drawing characters."""
+    box_drawing_chars = "│─┼├┤┬┴┌┐└┘═║╔╗╚╝━┏┓┗┛┣┫┳┻╋"
+    return any(char in box_drawing_chars for char in text)
 
 
 def _is_horizontal_separator(line: str) -> bool:
@@ -115,6 +122,61 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
             else:
                 del cleaned[footer_start:]
             continue
+
+        # Detect Claude footer without separators (new format):
+        # orchestrator label + prompt + optional @username at end
+        if cleaned:
+            plain_lines = [
+                _ANSI_ESCAPE_RE.sub("", line).strip() for line in cleaned
+            ]
+            search_end = len(plain_lines) - 1
+
+            # Skip trailing empty lines
+            while search_end >= 0 and not plain_lines[search_end]:
+                search_end -= 1
+
+            # Optional @username at the very end
+            if search_end >= 0 and plain_lines[search_end].startswith("@"):
+                search_end -= 1
+
+            # Skip empty lines before the username
+            while search_end >= 0 and not plain_lines[search_end]:
+                search_end -= 1
+
+            # Look for prompt line
+            if (
+                search_end >= 0
+                and _CLAUDE_PROMPT_RE.match(plain_lines[search_end])
+            ):
+                prompt_idx = search_end
+
+                # Skip empty lines before prompt
+                search_end = prompt_idx - 1
+                while search_end >= 0 and not plain_lines[search_end]:
+                    search_end -= 1
+
+                # Look for orchestrator label above prompt
+                if (
+                    search_end >= 0
+                    and _CLAUDE_ORCHESTRATOR_LABEL_RE.match(plain_lines[search_end])
+                ):
+                    footer_start = search_end
+
+                    # Skip empty lines before orchestrator
+                    search_end = footer_start - 1
+                    while search_end >= 0 and not plain_lines[search_end]:
+                        search_end -= 1
+
+                    # Optional update banner
+                    if (
+                        search_end >= 0
+                        and _CLAUDE_UPDATE_RE.search(plain_lines[search_end])
+                    ):
+                        footer_start = search_end
+
+                    # Remove everything from footer_start onwards
+                    del cleaned[footer_start:]
+                    continue
 
         if cleaned and _CODEX_PROMPT_RE.match(plain):
             cleaned.pop()
@@ -240,7 +302,7 @@ class SnapshotViewer(ScrollView):
         rows: list[tuple[str, tuple]] = []
         for i in range(len(self.snap_lines)):
             content = self.snap_lines[i].replace("\t", "    ")
-            if avail > 0 and len(content) > avail:
+            if avail > 0 and len(content) > avail and not _has_box_drawing_chars(content):
                 chunks = textwrap.wrap(content, avail) or [""]
             else:
                 chunks = [content]

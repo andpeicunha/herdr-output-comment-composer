@@ -9,6 +9,44 @@ from output_comment_composer import (
 )
 
 
+class SnapshotViewerWrapTests(unittest.TestCase):
+    def test_does_not_wrap_table_lines_with_box_drawing_chars(self):
+        """Lines with box-drawing characters should not be wrapped."""
+        # Create a long line with box-drawing chars (simulating an ASCII table)
+        long_table_line = "│ Header 1     │ Header 2     │ Header 3     │ ... more content that exceeds available width significantly"
+        viewer = SnapshotViewer([long_table_line], comments_ref=[])
+
+        # Simulate a narrow viewport that would normally trigger wrapping
+        viewer._refresh_row_map(wrap_width=80)
+
+        # Find all chunks for this line (line 0)
+        chunks_for_line = [
+            value for kind, value in viewer._row_map
+            if kind == "line_chunk" and value[0] == 0
+        ]
+
+        # Should have exactly 1 chunk (no wrapping)
+        self.assertEqual(len(chunks_for_line), 1)
+        self.assertIn("│", chunks_for_line[0][2])
+
+    def test_wraps_normal_text_lines_longer_than_available_width(self):
+        """Normal text lines should still be wrapped when they exceed available width."""
+        long_text = "Este é um texto muito longo sem nenhum caractere especial de caixa que deveria ser quebrado em múltiplas linhas quando a largura disponível for limitada"
+        viewer = SnapshotViewer([long_text], comments_ref=[])
+
+        # Simulate a narrow viewport
+        viewer._refresh_row_map(wrap_width=80)
+
+        # Find all chunks for this line (line 0)
+        chunks_for_line = [
+            value for kind, value in viewer._row_map
+            if kind == "line_chunk" and value[0] == 0
+        ]
+
+        # Should have multiple chunks (wrapping occurred)
+        self.assertGreater(len(chunks_for_line), 1)
+
+
 class CleanSnapshotLinesTests(unittest.TestCase):
     def test_removes_trailing_codex_status_line(self):
         lines = [
@@ -115,6 +153,42 @@ class CleanSnapshotLinesTests(unittest.TestCase):
         ]
 
         self.assertEqual(clean_snapshot_lines(lines), lines)
+
+    def test_removes_claude_footer_without_separators_new_format(self):
+        """Remove new Claude footer format without horizontal separators."""
+        lines = [
+            "Próximo passo: você confirmar se quer que eu limpe comentários extras nos YAMLs do pip-core/pip-ops-checklist-aluno também.",
+            "",
+            "✓ Update installed · Restart to update",
+            "",
+            "orchestrator –",
+            "❯",
+            "",
+            "@andrecunha",
+        ]
+
+        # Should remove everything from the update banner onwards, keeping only response
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Próximo passo: você confirmar se quer que eu limpe comentários extras nos YAMLs do pip-core/pip-ops-checklist-aluno também."],
+        )
+
+    def test_removes_claude_footer_without_separators_without_update_banner(self):
+        """Remove new Claude footer format when there's no update banner."""
+        lines = [
+            "Análise concluída.",
+            "",
+            "orchestrator —",
+            "❯",
+            "",
+            "@andrecunha",
+        ]
+
+        # Should remove footer even without update banner
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Análise concluída."],
+        )
 
 
 class BuildPromptTests(unittest.TestCase):
