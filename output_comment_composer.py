@@ -39,16 +39,18 @@ _CLAUDE_CONTEXT_STATUS_RE = re.compile(
     r"\borchestrator\b.*\bcont\b.*\d+%.*\b5h\b.*\d+%",
     re.IGNORECASE,
 )
-_CLAUDE_ORCHESTRATOR_LABEL_RE = re.compile(r"^orchestrator\b", re.IGNORECASE)
+_CLAUDE_ORCHESTRATOR_LABEL_RE = re.compile(r"\borchestrator\b", re.IGNORECASE)
 _CODEX_PROMPT_RE = re.compile(r"^[›❯>]\s*ask codex to do anything\s*$", re.IGNORECASE)
 _CLAUDE_PROMPT_RE = re.compile(r"^[›❯>](?:\s.*)?$")
 _CLAUDE_UPDATE_RE = re.compile(r"\bupdate installed\b.*\brestart to update\b", re.IGNORECASE)
 
 
+_BOX_DRAWING_RE = re.compile("[│─┼├┤┬┴┌┐└┘═║╔╗╚╝━┏┓┗┛┣┫┳┻╋]")
+
+
 def _has_box_drawing_chars(text: str) -> bool:
     """Return whether a text contains box-drawing characters."""
-    box_drawing_chars = "│─┼├┤┬┴┌┐└┘═║╔╗╚╝━┏┓┗┛┣┫┳┻╋"
-    return any(char in box_drawing_chars for char in text)
+    return _BOX_DRAWING_RE.search(text) is not None
 
 
 def _is_horizontal_separator(line: str) -> bool:
@@ -158,7 +160,7 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
                 # Look for orchestrator label above prompt
                 if (
                     search_end >= 0
-                    and _CLAUDE_ORCHESTRATOR_LABEL_RE.match(plain_lines[search_end])
+                    and _CLAUDE_ORCHESTRATOR_LABEL_RE.search(plain_lines[search_end])
                 ):
                     footer_start = search_end
 

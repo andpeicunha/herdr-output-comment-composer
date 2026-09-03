@@ -190,6 +190,39 @@ class CleanSnapshotLinesTests(unittest.TestCase):
             ["Análise concluída."],
         )
 
+    def test_removes_claude_footer_with_dashes_before_orchestrator_label(self):
+        """Remove footer when horizontal dashes precede 'orchestrator' on the same line."""
+        lines = [
+            "Análise completa com resultado.",
+            "",
+            "──────────────────────────── orchestrator",
+            "❯",
+            "",
+            "@andpeicunha",
+        ]
+
+        # Should remove everything from the dashes+orchestrator line onwards
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Análise completa com resultado."],
+        )
+
+    def test_preserves_legitimate_orchestrator_word_without_prompt_below(self):
+        """Preserve lines containing 'orchestrator' when not followed by a prompt."""
+        lines = [
+            "Este texto menciona que o orchestrator processou a requisição.",
+            "A análise está completa.",
+        ]
+
+        # Should NOT remove this content since there's no prompt line below "orchestrator"
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            [
+                "Este texto menciona que o orchestrator processou a requisição.",
+                "A análise está completa.",
+            ],
+        )
+
 
 class BuildPromptTests(unittest.TestCase):
     def test_build_prompt_includes_selected_lines_and_comments(self):
