@@ -126,7 +126,7 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
             continue
 
         # Detect Claude footer without separators (new format):
-        # orchestrator label + prompt + optional @username at end
+        # orchestrator label OR horizontal separator + prompt + optional @username at end
         if cleaned:
             plain_lines = [
                 _ANSI_ESCAPE_RE.sub("", line).strip() for line in cleaned
@@ -157,14 +157,17 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
                 while search_end >= 0 and not plain_lines[search_end]:
                     search_end -= 1
 
-                # Look for orchestrator label above prompt
+                # Look for orchestrator label or horizontal separator above prompt
                 if (
                     search_end >= 0
-                    and _CLAUDE_ORCHESTRATOR_LABEL_RE.search(plain_lines[search_end])
+                    and (
+                        _CLAUDE_ORCHESTRATOR_LABEL_RE.search(plain_lines[search_end])
+                        or _is_horizontal_separator(cleaned[search_end])
+                    )
                 ):
                     footer_start = search_end
 
-                    # Skip empty lines before orchestrator
+                    # Skip empty lines before orchestrator/separator
                     search_end = footer_start - 1
                     while search_end >= 0 and not plain_lines[search_end]:
                         search_end -= 1

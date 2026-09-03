@@ -223,6 +223,58 @@ class CleanSnapshotLinesTests(unittest.TestCase):
             ],
         )
 
+    def test_removes_claude_footer_with_pure_separator_no_orchestrator_no_banner(self):
+        """Remove footer when default agent uses pure separator (no 'orchestrator' label, no update banner)."""
+        lines = [
+            "Resposta completa do agente padrão.",
+            "",
+            "────────────────────────────────────────────────────",
+            "❯",
+            "",
+            "@andrecunha",
+        ]
+
+        # Should remove everything from the separator onwards, keeping only the response
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Resposta completa do agente padrão."],
+        )
+
+    def test_removes_claude_footer_with_separator_and_update_banner(self):
+        """Remove footer when default agent has update banner above separator."""
+        lines = [
+            "Ação executada com sucesso.",
+            "",
+            "✓ Update installed · Restart to update",
+            "",
+            "────────────────────────────────────────────────────",
+            "❯",
+            "",
+            "@andrecunha",
+        ]
+
+        # Should remove everything from the update banner onwards
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Ação executada com sucesso."],
+        )
+
+    def test_preserves_response_with_dash_decorations_without_prompt_below(self):
+        """Preserve lines with dash-like decorations when NOT followed by empty prompt line."""
+        lines = [
+            "Resumo final: ─────────────────────────",
+            "Análise concluída com êxito.",
+        ]
+
+        # Should NOT remove this since there's no prompt line below the dashes
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            [
+                "Resumo final: ─────────────────────────",
+                "Análise concluída com êxito.",
+            ],
+        )
+
 
 class BuildPromptTests(unittest.TestCase):
     def test_build_prompt_includes_selected_lines_and_comments(self):
