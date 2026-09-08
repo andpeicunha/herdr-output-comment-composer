@@ -36,7 +36,7 @@ _CLAUDE_COMPOSER_STATUS_RE = re.compile(
     re.IGNORECASE,
 )
 _CLAUDE_CONTEXT_STATUS_RE = re.compile(
-    r"\borchestrator\b.*\bcont\b.*\d+%.*\b5h\b.*\d+%",
+    r"\borchestrator\b.*\bcont\b.*\d+%",
     re.IGNORECASE,
 )
 _CLAUDE_ORCHESTRATOR_LABEL_RE = re.compile(r"\borchestrator\b", re.IGNORECASE)
@@ -57,6 +57,14 @@ def _is_horizontal_separator(line: str) -> bool:
     """Return whether a line is a terminal composer horizontal boundary."""
     plain = _ANSI_ESCAPE_RE.sub("", line).strip().replace(" ", "")
     return len(plain) >= 10 and all(char in "─━—-_═" for char in plain)
+
+
+def _starts_with_separator_run(line: str) -> bool:
+    """Return whether a line begins with a long run of separator characters,
+    even if followed by other text (e.g. an agent/model label)."""
+    plain = _ANSI_ESCAPE_RE.sub("", line).lstrip()
+    match = re.match(r"[─━—\-_═]{6,}", plain)
+    return match is not None
 
 
 def _is_agent_status_line(line: str) -> bool:
@@ -93,10 +101,10 @@ def clean_snapshot_lines(lines: list[str]) -> list[str]:
                 if re.search(r"(?:^|\s)/effort(?:\s|$)", candidate, re.IGNORECASE):
                     footer_start = index
                     break
-                if not _is_horizontal_separator(cleaned[index]):
+                if not (_is_horizontal_separator(cleaned[index]) or _starts_with_separator_run(cleaned[index])):
                     continue
                 for upper in range(index - 1, max(-1, index - 5), -1):
-                    if not _is_horizontal_separator(cleaned[upper]):
+                    if not (_is_horizontal_separator(cleaned[upper]) or _starts_with_separator_run(cleaned[upper])):
                         continue
                     between = [
                         _ANSI_ESCAPE_RE.sub("", line).strip()

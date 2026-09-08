@@ -275,6 +275,22 @@ class CleanSnapshotLinesTests(unittest.TestCase):
             ],
         )
 
+    def test_removes_claude_footer_with_mixed_separator_and_context_bar(self):
+        """Remove footer when separator line has 'orchestrator' label followed by context bar without '5h' indicator."""
+        lines = [
+            "Resposta com análise completa.",
+            "✓ Update installed · Restart to update",
+            "────────────────────────────────────────────────────────────── orchestrator ─",
+            "❯",
+            "────────────────────────────────────────────────────────────── orchestrator·Sonnet 5 | Cont █░░░░░░░░░ 8%",
+        ]
+
+        # Should remove everything from the update banner onwards, keeping only response
+        self.assertEqual(
+            clean_snapshot_lines(lines),
+            ["Resposta com análise completa."],
+        )
+
 
 class BuildPromptTests(unittest.TestCase):
     def test_build_prompt_includes_selected_lines_and_comments(self):
