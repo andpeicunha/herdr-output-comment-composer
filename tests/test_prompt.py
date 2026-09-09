@@ -29,6 +29,25 @@ class SnapshotViewerWrapTests(unittest.TestCase):
         self.assertEqual(len(chunks_for_line), 1)
         self.assertIn("│", chunks_for_line[0][2])
 
+    def test_does_not_wrap_long_markdown_table_rows(self):
+        """Long markdown table rows should not be wrapped."""
+        # Create a markdown table row with pipes that exceeds 80 chars
+        long_markdown_table = "| PR ID | what was changed | status | time | assignee name | original notes and review count |"
+        viewer = SnapshotViewer([long_markdown_table], comments_ref=[])
+
+        # Simulate a narrow viewport that would normally trigger wrapping
+        viewer._refresh_row_map(wrap_width=80)
+
+        # Find all chunks for this line (line 0)
+        chunks_for_line = [
+            value for kind, value in viewer._row_map
+            if kind == "line_chunk" and value[0] == 0
+        ]
+
+        # Should have exactly 1 chunk (no wrapping)
+        self.assertEqual(len(chunks_for_line), 1)
+        self.assertIn("|", chunks_for_line[0][2])
+
     def test_wraps_normal_text_lines_longer_than_available_width(self):
         """Normal text lines should still be wrapped when they exceed available width."""
         long_text = "Este é um texto muito longo sem nenhum caractere especial de caixa que deveria ser quebrado em múltiplas linhas quando a largura disponível for limitada"

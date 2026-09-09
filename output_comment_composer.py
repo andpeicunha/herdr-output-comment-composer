@@ -53,6 +53,19 @@ def _has_box_drawing_chars(text: str) -> bool:
     return _BOX_DRAWING_RE.search(text) is not None
 
 
+def _is_markdown_table_row(text: str) -> bool:
+    """Return whether a text is a markdown table row (data or separator).
+
+    Detects lines that start with | and contain multiple | (table markers),
+    or separator rows composed of |, -, :, and spaces.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("|"):
+        return False
+    # Count pipes; need at least 2 (opening and at least one separator/closing)
+    return stripped.count("|") >= 2
+
+
 def _is_horizontal_separator(line: str) -> bool:
     """Return whether a line is a terminal composer horizontal boundary."""
     plain = _ANSI_ESCAPE_RE.sub("", line).strip().replace(" ", "")
@@ -315,7 +328,7 @@ class SnapshotViewer(ScrollView):
         rows: list[tuple[str, tuple]] = []
         for i in range(len(self.snap_lines)):
             content = self.snap_lines[i].replace("\t", "    ")
-            if avail > 0 and len(content) > avail and not _has_box_drawing_chars(content):
+            if avail > 0 and len(content) > avail and not _has_box_drawing_chars(content) and not _is_markdown_table_row(content):
                 chunks = textwrap.wrap(content, avail) or [""]
             else:
                 chunks = [content]
