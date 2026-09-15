@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 from output_comment_composer import (
     ComposerApp,
@@ -414,6 +414,101 @@ class SnapshotViewerFocusTests(unittest.TestCase):
 
         message = viewer.post_message.call_args.args[0]
         self.assertIsInstance(message, SnapshotViewer.SelectionCompleted)
+
+
+class SnapshotViewerMouseDragRegressionTests(unittest.IsolatedAsyncioTestCase):
+    """Regression tests for mouse drag handling when movement goes outside viewer region."""
+
+    async def test_mouse_drag_outside_viewer_releases_mouse_capture(self):
+        """Test that mouse_up outside viewer calls release_mouse() and finalizes selection.
+
+        Regression test for: when dragging outside the viewer region (common since the
+        viewer occupies nearly the entire terminal height), on_mouse_up() did not call
+        release_mouse(). This left _dragging stuck as True and subsequent mouse events
+        were not processed correctly by other widgets.
+
+        This test uses real Textual event routing (Pilot) to verify that capture_mouse()
+        properly captures mouse events. Without capture_mouse(), mouse events outside
+        the viewer region would be routed to other widgets (e.g., Footer), and the
+        viewer's handlers would not be called. With capture_mouse(), all mouse events
+        are routed to the viewer, even if they occur outside its screen region.
+
+        Verification:
+        - Step 1: Mouse down at (10, 5) calls capture_mouse(), acquiring mouse focus
+        - Steps 2-3: Hover events within viewer region update selection (real routing)
+        - Step 4: Mouse up at (10, 29) OUTSIDE viewer region is routed to viewer
+          (thanks to capture_mouse()), calling release_mouse() and setting _dragging=False.
+          Without capture_mouse(), this event would route to Footer, leaving _dragging=True.
+        """
+        # Create a test app variant that doesn't do async fetch
+        class TestComposerApp(ComposerApp):
+            def on_mount(self) -> None:
+                viewer = self.query_one("#viewer", SnapshotViewer)
+                viewer.border_title = f"source: {self.source_pane}"
+                # Use preset snap_lines instead of fetching
+                viewer.snap_lines = self.snap_lines
+                viewer._refresh_row_map(viewer.size.width)
+                self.screen.refresh(layout=True)
+
+        app = TestComposerApp()
+        # Create >= 100 lines to ensure viewer occupies most of the app height
+        app.snap_lines = [f"line {i:03d}" for i in range(100)]
+
+        async with app.run_test(size=(80, 30)) as pilot:
+            viewer = app.query_one("#viewer", SnapshotViewer)
+
+            # Step 1: Mouse down at (10, 5) within viewer (widget-relative coordinates)
+            # This calls capture_mouse(), acquiring mouse focus for the viewer
+            await pilot.mouse_down("#viewer", offset=(10, 5))
+
+            self.assertTrue(
+                viewer._dragging,
+                "Should be dragging immediately after mouse_down"
+            )
+            # Capture the anchor line (it will be whatever line is at y=5)
+            initial_anchor = viewer._drag_anchor
+            self.assertIsNotNone(initial_anchor)
+            self.assertEqual(viewer.sel_start, initial_anchor)
+            self.assertEqual(viewer.sel_end, initial_anchor)
+
+            # Step 2: Hover within viewer at widget-relative coordinate (10, 20)
+            # Uses real Textual event routing (hover triggers MouseMove event)
+            # This verifies that dragging state is maintained during movement
+            await pilot.hover("#viewer", offset=(10, 20))
+
+            self.assertTrue(viewer._dragging, "Should still be dragging during move")
+            self.assertEqual(viewer.sel_start, initial_anchor, "Start should remain at anchor")
+            # Selection end may have updated; the exact value depends on line height
+            # What's important is that dragging state is preserved
+
+            # Step 3: Critical test - Mouse up at screen coordinate (10, 29)
+            # y=29 is outside the viewer region (Footer is at row 29 in a 30-row app).
+            # This event MUST be routed to the viewer and call release_mouse().
+            #
+            # WITH capture_mouse(): The viewer receives the mouse_up event because
+            #   it has captured the mouse, so release_mouse() is called and _dragging=False.
+            # WITHOUT capture_mouse(): The event routes to Footer instead, viewer's
+            #   on_mouse_up is NOT called, and _dragging remains True.
+            #
+            # Using screen coordinates (no widget specified) ensures we're testing
+            # the critical case: mouse_up outside the viewer's visible region.
+            # This assertion ONLY passes if the mouse_up event reached the viewer:
+            await pilot.mouse_up(offset=(10, 29))
+
+            # Step 4: Verify the fix - this assertion proves capture_mouse() was essential
+            # If release_mouse() was not called, _dragging would remain True,
+            # and the widget would continue intercepting mouse events.
+            self.assertFalse(
+                viewer._dragging,
+                "Mouse should be released after up event, even if outside viewer region. "
+                "This assertion ONLY passes if the mouse_up event at y=29 was routed to the "
+                "viewer widget. Without capture_mouse(), the event would route to Footer instead, "
+                "and _dragging would remain True, causing this assertion to FAIL."
+            )
+            self.assertIsNone(
+                viewer._drag_anchor,
+                "Drag anchor should be cleared after mouse_up"
+            )
 
 
 if __name__ == "__main__":

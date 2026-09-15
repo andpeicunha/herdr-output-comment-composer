@@ -442,6 +442,7 @@ class SnapshotViewer(ScrollView):
         self._dragging = True
         self.sel_start = line
         self.sel_end = line
+        self.capture_mouse()
         self.refresh()
         event.stop()
 
@@ -467,6 +468,7 @@ class SnapshotViewer(ScrollView):
             self.sel_end = b
         self._dragging = False
         self._drag_anchor = None
+        self.release_mouse()
         self.refresh()
         event.stop()
         self._request_comment_for_selection()
