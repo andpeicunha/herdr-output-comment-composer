@@ -15,7 +15,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.color import Color
 from textual.containers import Vertical
-from textual.events import Key, MouseDown, MouseMove, MouseUp
+from textual.events import Key, MouseDown, MouseEvent, MouseMove, MouseUp
 from textual.geometry import Region, Size
 from textual.message import Message
 from textual.scroll_view import ScrollView
@@ -334,9 +334,21 @@ class SnapshotViewer(ScrollView):
     # Mouse selection
     # ------------------------------------------------------------------
 
-    def _y_to_line(self, y: int) -> Optional[int]:
-        y = y - 1  # compensate for 1-cell top border
-        row_idx = y + int(self.scroll_offset.y)
+    def _y_to_line(self, event: MouseEvent) -> Optional[int]:
+        """Map a mouse event to a logical snapshot line.
+
+        ``event.y`` is relative to the widget that forwarded the event.  That
+        coordinate became unreliable for plugin panes/zoomed overlays (it can
+        remain at the top of the viewport), so use the screen coordinate and
+        Textual's actual content region instead.  The content-region origin
+        already accounts for the border; add the ScrollView offset exactly
+        once to get the virtual row.
+        """
+        row_idx = (
+            event.screen_y
+            - self.content_region.y
+            + int(self.scroll_offset.y)
+        )
         if row_idx < 0 or row_idx >= len(self._row_map):
             return None
         kind, value = self._row_map[row_idx]
@@ -347,7 +359,7 @@ class SnapshotViewer(ScrollView):
     def on_mouse_down(self, event: MouseDown) -> None:
         if event.button != 1:
             return
-        line = self._y_to_line(event.y)
+        line = self._y_to_line(event)
         if line is None:
             return
         self._drag_anchor = line
@@ -360,7 +372,7 @@ class SnapshotViewer(ScrollView):
     def on_mouse_move(self, event: MouseMove) -> None:
         if not self._dragging or self._drag_anchor is None:
             return
-        line = self._y_to_line(event.y)
+        line = self._y_to_line(event)
         if line is None:
             return
         a, b = sorted((self._drag_anchor, line))
@@ -372,7 +384,7 @@ class SnapshotViewer(ScrollView):
     def on_mouse_up(self, event: MouseUp) -> None:
         if not self._dragging:
             return
-        line = self._y_to_line(event.y)
+        line = self._y_to_line(event)
         if line is not None and self._drag_anchor is not None:
             a, b = sorted((self._drag_anchor, line))
             self.sel_start = a
