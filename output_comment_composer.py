@@ -344,11 +344,8 @@ class SnapshotViewer(ScrollView):
         already accounts for the border; add the ScrollView offset exactly
         once to get the virtual row.
         """
-        row_idx = (
-            event.screen_y
-            - self.content_region.y
-            + int(self.scroll_offset.y)
-        )
+        content_offset = event.get_content_offset_capture(self)
+        row_idx = content_offset.y + int(self.scroll_offset.y)
         if row_idx < 0 or row_idx >= len(self._row_map):
             return None
         kind, value = self._row_map[row_idx]
@@ -364,6 +361,10 @@ class SnapshotViewer(ScrollView):
             return
         self._drag_anchor = line
         self._dragging = True
+        # Keep receiving move/up events while the pointer leaves the exact
+        # cell where the drag started. This is required by overlay/plugin
+        # panes, where the parent screen otherwise retargets the event.
+        self.capture_mouse()
         self.sel_start = line
         self.sel_end = line
         self.refresh()
@@ -391,6 +392,7 @@ class SnapshotViewer(ScrollView):
             self.sel_end = b
         self._dragging = False
         self._drag_anchor = None
+        self.release_mouse()
         self.refresh()
         event.stop()
         self._request_comment_for_selection()
