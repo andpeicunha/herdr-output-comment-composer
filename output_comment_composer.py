@@ -334,6 +334,23 @@ class SnapshotViewer(ScrollView):
     # Mouse selection
     # ------------------------------------------------------------------
 
+    def _debug_mouse_event(self, event: MouseEvent, line: Optional[int]) -> None:
+        """Write raw mouse geometry when debug logging is enabled."""
+        debug_dir = os.environ.get("OCC_DEBUG_DIR", "")
+        if not debug_dir:
+            return
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+            with open(os.path.join(debug_dir, "mouse.log"), "a", encoding="utf-8") as log:
+                log.write(
+                    f"{type(event).__name__} x={event.x} y={event.y} "
+                    f"screen=({event.screen_x},{event.screen_y}) "
+                    f"region={self.region} content={self.content_region} "
+                    f"scroll={self.scroll_offset} line={line}\n"
+                )
+        except OSError:
+            pass
+
     def _y_to_line(self, event: MouseEvent) -> Optional[int]:
         """Map a mouse event to a logical snapshot line.
 
@@ -357,6 +374,7 @@ class SnapshotViewer(ScrollView):
         if event.button != 1:
             return
         line = self._y_to_line(event)
+        self._debug_mouse_event(event, line)
         if line is None:
             return
         self._drag_anchor = line
@@ -374,6 +392,7 @@ class SnapshotViewer(ScrollView):
         if not self._dragging or self._drag_anchor is None:
             return
         line = self._y_to_line(event)
+        self._debug_mouse_event(event, line)
         if line is None:
             return
         a, b = sorted((self._drag_anchor, line))
@@ -386,6 +405,7 @@ class SnapshotViewer(ScrollView):
         if not self._dragging:
             return
         line = self._y_to_line(event)
+        self._debug_mouse_event(event, line)
         if line is not None and self._drag_anchor is not None:
             a, b = sorted((self._drag_anchor, line))
             self.sel_start = a
