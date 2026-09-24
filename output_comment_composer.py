@@ -203,10 +203,12 @@ class SnapshotViewer(ScrollView):
         """Posted when a mouse selection is ready to be annotated."""
 
     BINDINGS = [
-        Binding("j", "scroll_down_line", "Down", show=False),
-        Binding("k", "scroll_up_line", "Up", show=False),
-        Binding("down", "scroll_down_line", "Down", show=False),
-        Binding("up", "scroll_up_line", "Up", show=False),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("down", "cursor_down", "Down", show=False),
+        Binding("up", "cursor_up", "Up", show=False),
+        Binding("shift+down", "extend_down", "Extend", show=False),
+        Binding("shift+up", "extend_up", "Extend", show=False),
     ]
 
     def __init__(self, lines: list[str], comments_ref: list[tuple[int, int, str]] | None = None, **kwargs):
@@ -216,10 +218,11 @@ class SnapshotViewer(ScrollView):
         self.sel_start: Optional[int] = None
         self.sel_end: Optional[int] = None
         self._drag_anchor: Optional[int] = None
-        self._click_anchor: Optional[int] = None
         self._dragging = False
         self._row_map: list[tuple[str, tuple]] = []
         self._wrap_width: int = 0
+        self._kb_cursor: int = 0
+        self._kb_anchor: Optional[int] = None
         self._refresh_row_map()
 
     def _refresh_row_map(self, wrap_width: int = 0) -> None:
@@ -250,6 +253,10 @@ class SnapshotViewer(ScrollView):
             if i in after:
                 rows.append(("annotation", (after[i],)))
         self._row_map = rows
+        if self.snap_lines:
+            self._kb_cursor = max(0, min(self._kb_cursor, len(self.snap_lines) - 1))
+        else:
+            self._kb_cursor = 0
         if self.is_mounted:
             w = wrap_width or self.size.width
             self.virtual_size = Size(w, len(self._row_map))
@@ -378,29 +385,6 @@ class SnapshotViewer(ScrollView):
         self._debug_mouse_event(event, line)
         if line is None:
             return
-
-        # Handle shift+click for extended selection without drag
-        if event.shift:
-            if self._click_anchor is not None:
-                # Extend selection from anchor to current line
-                a, b = sorted((self._click_anchor, line))
-                self.sel_start = a
-                self.sel_end = b
-                self.refresh()
-                event.stop()
-                # Mark that shift+click happened but don't drag
-                self._dragging = False
-                return
-            # If no anchor yet, set it and wait for next shift+click
-            self._click_anchor = line
-            self.sel_start = line
-            self.sel_end = line
-            self.refresh()
-            event.stop()
-            return
-
-        # Regular (non-shift) click: reset anchor and start drag
-        self._click_anchor = line
         self._drag_anchor = line
         self._dragging = True
         # Keep receiving move/up events while the pointer leaves the exact
@@ -426,15 +410,6 @@ class SnapshotViewer(ScrollView):
         event.stop()
 
     def on_mouse_up(self, event: MouseUp) -> None:
-        # Handle shift+click completion (no drag involved)
-        if event.shift and not self._dragging and self.has_selection():
-            self._debug_mouse_event(event, None)
-            self.refresh()
-            event.stop()
-            self._request_comment_for_selection()
-            return
-
-        # Handle drag completion
         if not self._dragging:
             return
         line = self._y_to_line(event)
@@ -458,11 +433,40 @@ class SnapshotViewer(ScrollView):
     # Keyboard scroll helpers
     # ------------------------------------------------------------------
 
-    def action_scroll_down_line(self) -> None:
-        self.scroll_relative(y=1)
+    def _clamp_cursor(self, line_idx: int) -> int:
+        if not self.snap_lines:
+            return 0
+        return max(0, min(line_idx, len(self.snap_lines) - 1))
 
-    def action_scroll_up_line(self) -> None:
-        self.scroll_relative(y=-1)
+    def action_cursor_down(self) -> None:
+        self._kb_anchor = None
+        self._kb_cursor = self._clamp_cursor(self._kb_cursor + 1)
+        self.sel_start = self.sel_end = self._kb_cursor
+        self.refresh()
+        self._scroll_kb_cursor_into_view()
+
+    def action_cursor_up(self) -> None:
+        self._kb_anchor = None
+        self._kb_cursor = self._clamp_cursor(self._kb_cursor - 1)
+        self.sel_start = self.sel_end = self._kb_cursor
+        self.refresh()
+        self._scroll_kb_cursor_into_view()
+
+    def action_extend_down(self) -> None:
+        if self._kb_anchor is None:
+            self._kb_anchor = self._kb_cursor
+        self._kb_cursor = self._clamp_cursor(self._kb_cursor + 1)
+        self.sel_start, self.sel_end = sorted((self._kb_anchor, self._kb_cursor))
+        self.refresh()
+        self._scroll_kb_cursor_into_view()
+
+    def action_extend_up(self) -> None:
+        if self._kb_anchor is None:
+            self._kb_anchor = self._kb_cursor
+        self._kb_cursor = self._clamp_cursor(self._kb_cursor - 1)
+        self.sel_start, self.sel_end = sorted((self._kb_anchor, self._kb_cursor))
+        self.refresh()
+        self._scroll_kb_cursor_into_view()
 
     # ------------------------------------------------------------------
     # Selection helpers
@@ -471,14 +475,12 @@ class SnapshotViewer(ScrollView):
     def has_selection(self) -> bool:
         return self.sel_start is not None and self.sel_end is not None
 
-    def _selection_target_row(self) -> Optional[int]:
-        """Return the row containing the selected line's annotation or text."""
-        if self.sel_end is None:
-            return None
+    def _line_to_row(self, line_idx: int) -> Optional[int]:
+        """Return the row in ``_row_map`` for ``line_idx`` (annotation row if present)."""
         line_rows = [
             index
             for index, (kind, value) in enumerate(self._row_map)
-            if kind == "line_chunk" and value[0] == self.sel_end
+            if kind == "line_chunk" and value[0] == line_idx
         ]
         if not line_rows:
             return None
@@ -491,6 +493,12 @@ class SnapshotViewer(ScrollView):
             return annotation_row
         return last_line_row
 
+    def _selection_target_row(self) -> Optional[int]:
+        """Return the row containing the selected line's annotation or text."""
+        if self.sel_end is None:
+            return None
+        return self._line_to_row(self.sel_end)
+
     def scroll_selection_into_view(self) -> None:
         """Center the selected line/comment after the editor closes."""
         target_row = self._selection_target_row()
@@ -501,6 +509,19 @@ class SnapshotViewer(ScrollView):
             center=True,
             animate=False,
             force=True,
+            immediate=True,
+            x_axis=False,
+        )
+
+    def _scroll_kb_cursor_into_view(self) -> None:
+        """Keep the keyboard cursor line visible in the viewport."""
+        target_row = self._line_to_row(self._kb_cursor)
+        if target_row is None:
+            return
+        self.scroll_to_region(
+            Region(0, target_row, max(1, self.size.width), 1),
+            animate=False,
+            force=False,
             immediate=True,
             x_axis=False,
         )
@@ -674,6 +695,7 @@ class ComposerApp(App[None]):
         self.snap_lines = message.lines
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.snap_lines = self.snap_lines
+        viewer._kb_cursor = len(viewer.snap_lines) - 1 if viewer.snap_lines else 0
         viewer._refresh_row_map(viewer.size.width)
         self.screen.refresh(layout=True)
         viewer.scroll_end(animate=False)
