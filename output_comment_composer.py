@@ -216,6 +216,7 @@ class SnapshotViewer(ScrollView):
         self.sel_start: Optional[int] = None
         self.sel_end: Optional[int] = None
         self._drag_anchor: Optional[int] = None
+        self._click_anchor: Optional[int] = None
         self._dragging = False
         self._row_map: list[tuple[str, tuple]] = []
         self._wrap_width: int = 0
@@ -377,6 +378,29 @@ class SnapshotViewer(ScrollView):
         self._debug_mouse_event(event, line)
         if line is None:
             return
+
+        # Handle shift+click for extended selection without drag
+        if event.shift:
+            if self._click_anchor is not None:
+                # Extend selection from anchor to current line
+                a, b = sorted((self._click_anchor, line))
+                self.sel_start = a
+                self.sel_end = b
+                self.refresh()
+                event.stop()
+                # Mark that shift+click happened but don't drag
+                self._dragging = False
+                return
+            # If no anchor yet, set it and wait for next shift+click
+            self._click_anchor = line
+            self.sel_start = line
+            self.sel_end = line
+            self.refresh()
+            event.stop()
+            return
+
+        # Regular (non-shift) click: reset anchor and start drag
+        self._click_anchor = line
         self._drag_anchor = line
         self._dragging = True
         # Keep receiving move/up events while the pointer leaves the exact
@@ -402,6 +426,15 @@ class SnapshotViewer(ScrollView):
         event.stop()
 
     def on_mouse_up(self, event: MouseUp) -> None:
+        # Handle shift+click completion (no drag involved)
+        if event.shift and not self._dragging and self.has_selection():
+            self._debug_mouse_event(event, None)
+            self.refresh()
+            event.stop()
+            self._request_comment_for_selection()
+            return
+
+        # Handle drag completion
         if not self._dragging:
             return
         line = self._y_to_line(event)
