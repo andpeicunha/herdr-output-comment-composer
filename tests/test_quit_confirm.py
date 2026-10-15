@@ -70,6 +70,43 @@ class QuitConfirmTests(unittest.TestCase):
 
         self.assertEqual(exits, [True])
 
+    def test_enter_on_default_focus_keeps_the_pane(self):
+        async def scenario(app, pilot):
+            app.comments.append((0, 0, "keep me"))
+            await pilot.press("escape")
+            await pilot.pause(0.1)
+            self.assertEqual(app.focused.id, "confirm-no")
+            await pilot.press("enter")
+
+        exits, screen = _run(scenario)
+
+        self.assertEqual(exits, [])
+        self.assertNotIsInstance(screen, ConfirmScreen)
+
+    def test_right_arrow_then_enter_exits(self):
+        async def scenario(app, pilot):
+            app.comments.append((0, 0, "bye"))
+            await pilot.press("escape")
+            await pilot.pause(0.1)
+            await pilot.press("right")
+            self.assertEqual(app.focused.id, "confirm-yes")
+            await pilot.press("enter")
+
+        exits, _screen = _run(scenario)
+
+        self.assertEqual(exits, [True])
+
+    def test_clicking_discard_button_exits(self):
+        async def scenario(app, pilot):
+            app.comments.append((0, 0, "bye"))
+            await pilot.press("escape")
+            await pilot.pause(0.1)
+            await pilot.click("#confirm-yes")
+
+        exits, _screen = _run(scenario)
+
+        self.assertEqual(exits, [True])
+
     def test_escape_on_typed_draft_asks_before_discarding(self):
         async def scenario(app, pilot):
             viewer = app.query_one("#viewer", SnapshotViewer)

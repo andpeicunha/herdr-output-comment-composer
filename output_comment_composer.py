@@ -15,14 +15,14 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.color import Color
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.events import Key, MouseDown, MouseEvent, MouseMove, MouseUp
 from textual.geometry import Region, Size
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
-from textual.widgets import Footer, Label, TextArea
+from textual.widgets import Button, Footer, Label, TextArea
 from textual import work
 
 
@@ -895,12 +895,17 @@ class CommentInput(TextArea):
 
 
 class ConfirmScreen(ModalScreen[bool]):
-    """Yes/no modal used before discarding comments."""
+    """Yes/no modal used before discarding comments.
+
+    "Voltar" is focused first so a stray Enter never discards anything.
+    """
 
     BINDINGS = [
         Binding("y", "answer(True)", "yes", show=False),
         Binding("n", "answer(False)", "no", show=False),
         Binding("escape", "answer(False)", "no", show=False),
+        Binding("left", "focus_previous", "previous", show=False),
+        Binding("right", "focus_next", "next", show=False),
     ]
 
     DEFAULT_CSS = """
@@ -910,31 +915,56 @@ class ConfirmScreen(ModalScreen[bool]):
     }
 
     #confirm-box {
-        width: auto;
-        max-width: 70;
+        width: 60;
         height: auto;
         border: heavy $warning;
         background: $panel;
         padding: 1 2;
     }
 
-    #confirm-hint {
-        color: $text-muted;
-        margin-top: 1;
+    #confirm-question {
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    #confirm-buttons {
+        width: 100%;
+        height: auto;
+        align-horizontal: center;
+    }
+
+    #confirm-buttons Button {
+        margin: 0 1;
     }
     """
 
-    def __init__(self, question: str) -> None:
+    def __init__(self, question: str, confirm_label: str = "Sair e descartar") -> None:
         super().__init__()
         self.question = question
+        self.confirm_label = confirm_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Label(self.question, id="confirm-question")
-            yield Label("y sair · n/esc voltar", id="confirm-hint")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Voltar (n)", id="confirm-no", variant="primary")
+                yield Button(f"{self.confirm_label} (y)", id="confirm-yes", variant="error")
+
+    def on_mount(self) -> None:
+        self.query_one("#confirm-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "confirm-yes")
 
     def action_answer(self, answer: bool) -> None:
         self.dismiss(answer)
+
+    def action_focus_previous(self) -> None:
+        self.focus_previous()
+
+    def action_focus_next(self) -> None:
+        self.focus_next()
 
 
 # ---------------------------------------------------------------------------
@@ -1218,7 +1248,7 @@ class ComposerApp(App[None]):
         draft = self.query_one("#comment-input", CommentInput).text.strip()
         if draft and draft != self._draft_original.strip():
             self.push_screen(
-                ConfirmScreen("Descartar o texto deste comentário?"),
+                ConfirmScreen("Descartar o texto deste comentário?", "Descartar"),
                 lambda discard: self._discard_comment() if discard else None,
             )
             return
