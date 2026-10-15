@@ -905,7 +905,7 @@ Screen {
 
 #viewer {
     height: 1fr;
-    border: solid #3f3f46;
+    border: heavy #22c55e;
     overflow-x: hidden;
     scrollbar-size-vertical: 1;
 }
