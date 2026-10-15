@@ -19,6 +19,7 @@ from textual.containers import Vertical
 from textual.events import Key, MouseDown, MouseEvent, MouseMove, MouseUp
 from textual.geometry import Region, Size
 from textual.message import Message
+from textual.screen import ModalScreen
 from textual.scroll_view import ScrollView
 from textual.strip import Strip
 from textual.widgets import Footer, Label, TextArea
@@ -893,6 +894,49 @@ class CommentInput(TextArea):
             event.prevent_default()
 
 
+class ConfirmScreen(ModalScreen[bool]):
+    """Yes/no modal used before discarding comments."""
+
+    BINDINGS = [
+        Binding("y", "answer(True)", "yes", show=False),
+        Binding("n", "answer(False)", "no", show=False),
+        Binding("escape", "answer(False)", "no", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    ConfirmScreen {
+        align: center middle;
+        background: $background 60%;
+    }
+
+    #confirm-box {
+        width: auto;
+        max-width: 70;
+        height: auto;
+        border: heavy $warning;
+        background: $panel;
+        padding: 1 2;
+    }
+
+    #confirm-hint {
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, question: str) -> None:
+        super().__init__()
+        self.question = question
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Label(self.question, id="confirm-question")
+            yield Label("y sair · n/esc voltar", id="confirm-hint")
+
+    def action_answer(self, answer: bool) -> None:
+        self.dismiss(answer)
+
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -978,6 +1022,7 @@ class ComposerApp(App[None]):
         self.snap_lines: list[str] = []
         self.comments: list[tuple[int, int, str]] = []
         self._editing_comment_idx: Optional[int] = None
+        self._draft_original: str = ""
         self._meta_dir: str = ""
         meta = os.environ.get("OUTPUT_COMMENT_COMPOSER_META", "")
         if meta:
@@ -1111,6 +1156,7 @@ class ComposerApp(App[None]):
         inp.clear()
         if existing_text:
             inp.insert(existing_text)
+        self._draft_original = existing_text
         inp.focus()
 
     def on_snapshot_viewer_selection_completed(
@@ -1169,6 +1215,16 @@ class ComposerApp(App[None]):
         self.call_after_refresh(viewer.scroll_selection_into_view)
 
     def cancel_comment(self) -> None:
+        draft = self.query_one("#comment-input", CommentInput).text.strip()
+        if draft and draft != self._draft_original.strip():
+            self.push_screen(
+                ConfirmScreen("Descartar o texto deste comentário?"),
+                lambda discard: self._discard_comment() if discard else None,
+            )
+            return
+        self._discard_comment()
+
+    def _discard_comment(self) -> None:
         panel = self.query_one("#comment-panel")
         panel.remove_class("visible")
         inp = self.query_one("#comment-input", CommentInput)
@@ -1251,6 +1307,17 @@ class ComposerApp(App[None]):
         panel = self.query_one("#comment-panel")
         if "visible" in panel.classes:
             return
+        if self.comments:
+            count = len(self.comments)
+            noun = "comentário" if count == 1 else "comentários"
+            self.push_screen(
+                ConfirmScreen(f"Você tem {count} {noun} não enviado(s). Sair e perder?"),
+                lambda leave: self._exit_now() if leave else None,
+            )
+            return
+        self._exit_now()
+
+    def _exit_now(self) -> None:
         self._cleanup()
         self.exit()
 
