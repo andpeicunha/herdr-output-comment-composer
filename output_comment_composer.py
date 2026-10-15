@@ -2,6 +2,7 @@
 """Output Comment Composer — Textual TUI rewrite."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -170,19 +171,129 @@ def reflow_wrapped_prose(lines: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def load_meta() -> str:
-    """Return source_pane."""
-    source_pane = os.environ.get("HERDR_PANE_ID", "unknown")
+def load_meta_values() -> dict[str, str]:
+    """Return the KEY=value pairs written by herdr/pane.sh."""
+    values: dict[str, str] = {}
     meta = os.environ.get("OUTPUT_COMMENT_COMPOSER_META", "")
     if meta and os.path.isfile(meta):
         with open(meta, encoding="utf-8", errors="replace") as f:
             for line in f:
                 key, sep, value = line.rstrip("\n").partition("=")
-                if not sep:
+                if sep:
+                    values[key] = value
+    return values
+
+
+def load_meta() -> str:
+    """Return source_pane."""
+    source_pane = os.environ.get("HERDR_PANE_ID", "unknown")
+    return load_meta_values().get("SOURCE_PANE_ID") or source_pane
+
+
+# ---------------------------------------------------------------------------
+# Claude transcript loading
+# ---------------------------------------------------------------------------
+
+_TRANSCRIPT_MAX_LINES = 2000
+_SYSTEM_REMINDER_RE = re.compile(r"<system-reminder>.*?</system-reminder>", re.DOTALL)
+_SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def find_claude_transcript(session_id: str) -> Optional[str]:
+    """Return the JSONL transcript path for a Claude session, if it exists."""
+    if not session_id or not _SESSION_ID_RE.match(session_id):
+        return None
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    projects = os.path.join(config_dir, "projects")
+    try:
+        project_dirs = os.listdir(projects)
+    except OSError:
+        return None
+    for project in project_dirs:
+        path = os.path.join(projects, project, f"{session_id}.jsonl")
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _user_prompt_text(content: object) -> str:
+    """Return the visible text of a user prompt, or "" for tool results/commands."""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+            return ""
+        text = "\n".join(
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    else:
+        return ""
+    text = _SYSTEM_REMINDER_RE.sub("", text).strip()
+    if text.startswith(("<command-", "<local-command", "<task-notification")):
+        return ""
+    return text
+
+
+def _tool_use_label(block: dict) -> str:
+    tool_input = block.get("input") if isinstance(block.get("input"), dict) else {}
+    detail = (
+        tool_input.get("description")
+        or tool_input.get("file_path")
+        or tool_input.get("pattern")
+        or tool_input.get("command")
+        or ""
+    )
+    detail = str(detail).splitlines()[0] if detail else ""
+    return f"● {block.get('name', 'tool')}({detail})"
+
+
+def transcript_lines(entries: list[dict]) -> list[str]:
+    """Render Claude transcript entries as plain text lines for the viewer."""
+    lines: list[str] = []
+
+    def add_block(marker: str, text: str) -> None:
+        if lines:
+            lines.append("")
+        for index, line in enumerate(text.splitlines() or [""]):
+            lines.append(f"{marker} {line}" if index == 0 else f"  {line}")
+
+    for entry in entries:
+        if entry.get("isSidechain") or entry.get("isMeta"):
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if entry.get("type") == "user":
+            text = _user_prompt_text(content)
+            if text:
+                add_block("❯", text)
+        elif entry.get("type") == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
                     continue
-                if key == "SOURCE_PANE_ID":
-                    source_pane = value or source_pane
-    return source_pane
+                if block.get("type") == "text" and block.get("text", "").strip():
+                    add_block("●", block["text"].strip())
+                elif block.get("type") == "tool_use":
+                    if lines:
+                        lines.append("")
+                    lines.append(_tool_use_label(block))
+
+    return lines[-_TRANSCRIPT_MAX_LINES:]
+
+
+def read_claude_transcript(path: str) -> list[str]:
+    """Read a Claude JSONL transcript, skipping lines that fail to parse."""
+    entries: list[dict] = []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for raw in f:
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+    return transcript_lines(entries)
 
 
 # ---------------------------------------------------------------------------
@@ -668,7 +779,22 @@ class ComposerApp(App[None]):
         self.post_message(self.SnapshotReady(lines))
 
     def _do_fetch(self) -> list[str]:
-        return self._fetch_pane_read()
+        # herdr only keeps the visible screen for fullscreen (alt-screen)
+        # agents, so prefer the full Claude transcript when there is one.
+        lines = self._fetch_claude_transcript()
+        return lines or self._fetch_pane_read()
+
+    def _fetch_claude_transcript(self) -> list[str]:
+        meta = load_meta_values()
+        if meta.get("AGENT", "claude") not in ("", "claude"):
+            return []
+        path = find_claude_transcript(meta.get("SESSION_ID", ""))
+        if not path:
+            return []
+        try:
+            return read_claude_transcript(path)
+        except OSError:
+            return []
 
     def _fetch_pane_read(self) -> list[str]:
         herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
