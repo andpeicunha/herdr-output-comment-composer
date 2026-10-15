@@ -7,11 +7,11 @@ import os
 import re
 import shutil
 import subprocess
-import textwrap
 from typing import Optional
 
 from rich.segment import Segment
 from rich.style import Style
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.color import Color
@@ -282,8 +282,8 @@ def transcript_lines(entries: list[dict]) -> list[str]:
     return lines[-_TRANSCRIPT_MAX_LINES:]
 
 
-def read_claude_transcript(path: str) -> list[str]:
-    """Read a Claude JSONL transcript, skipping lines that fail to parse."""
+def _read_jsonl(path: str) -> list[dict]:
+    """Read JSONL objects, skipping lines that fail to parse."""
     entries: list[dict] = []
     with open(path, encoding="utf-8", errors="replace") as f:
         for raw in f:
@@ -293,7 +293,220 @@ def read_claude_transcript(path: str) -> list[str]:
                 continue
             if isinstance(entry, dict):
                 entries.append(entry)
-    return transcript_lines(entries)
+    return entries
+
+
+def read_claude_transcript(path: str) -> list[str]:
+    """Read a Claude JSONL transcript as viewer lines."""
+    return transcript_lines(_read_jsonl(path))
+
+
+# ---------------------------------------------------------------------------
+# Codex transcript loading
+# ---------------------------------------------------------------------------
+
+
+def find_codex_transcript(session_id: str) -> Optional[str]:
+    """Return the rollout JSONL path for a Codex thread, if it exists.
+
+    Codex stores threads as ``sessions/YYYY/MM/DD/rollout-<ts>-<thread_id>.jsonl``.
+    """
+    if not session_id or not _SESSION_ID_RE.match(session_id):
+        return None
+    codex_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    suffix = f"-{session_id}.jsonl"
+    newest: Optional[str] = None
+    for root, _dirs, files in os.walk(os.path.join(codex_home, "sessions")):
+        for name in files:
+            if name.startswith("rollout-") and name.endswith(suffix):
+                path = os.path.join(root, name)
+                if newest is None or path > newest:
+                    newest = path
+    return newest
+
+
+def _codex_message_text(payload: dict) -> str:
+    content = payload.get("content")
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        b.get("text", "")
+        for b in content
+        if isinstance(b, dict) and b.get("type") in ("input_text", "output_text")
+    ).strip()
+
+
+def _codex_tool_detail(payload: dict) -> str:
+    """Best-effort one-line summary of a Codex tool call's arguments."""
+    raw = payload.get("arguments", payload.get("input", ""))
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            pass
+    if isinstance(raw, dict):
+        raw = raw.get("description") or raw.get("cmd") or raw.get("command") or raw.get("path") or ""
+    if isinstance(raw, list):
+        raw = " ".join(str(part) for part in raw)
+    lines = str(raw).strip().splitlines()
+    return lines[0] if lines else ""
+
+
+def codex_transcript_lines(entries: list[dict]) -> list[str]:
+    """Render Codex rollout entries in the same line format as Claude's."""
+    blocks: list[dict] = []
+    for entry in entries:
+        if entry.get("type") != "response_item":
+            continue
+        payload = entry.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        kind = payload.get("type")
+        if kind == "message" and payload.get("role") == "user":
+            text = _codex_message_text(payload)
+            # Codex injects AGENTS.md / environment context as user messages.
+            if text and not text.startswith(("<", "# AGENTS.md")):
+                blocks.append(_user(text))
+        elif kind == "message" and payload.get("role") == "assistant":
+            text = _codex_message_text(payload)
+            if text:
+                blocks.append(_assistant_block({"type": "text", "text": text}))
+        elif kind in ("function_call", "custom_tool_call", "local_shell_call"):
+            name = payload.get("name") or "shell"
+            blocks.append(
+                _assistant_block(
+                    {"type": "tool_use", "name": name, "input": {"description": _codex_tool_detail(payload)}}
+                )
+            )
+    return transcript_lines(blocks)
+
+
+def _user(text: str) -> dict:
+    return {"type": "user", "message": {"role": "user", "content": text}}
+
+
+def _assistant_block(block: dict) -> dict:
+    return {"type": "assistant", "message": {"role": "assistant", "content": [block]}}
+
+
+def read_codex_transcript(path: str) -> list[str]:
+    """Read a Codex rollout JSONL as viewer lines."""
+    return codex_transcript_lines(_read_jsonl(path))
+
+
+# ---------------------------------------------------------------------------
+# Markdown display styling (transcript snapshots only)
+# ---------------------------------------------------------------------------
+
+_PROMPT_STYLE = Style(color="#a5b4fc")
+_MARKER_STYLE = Style(color="white", bold=True)
+_TOOL_MARKER_STYLE = Style(color="green", bold=True)
+_TOOL_NAME_STYLE = Style(bold=True)
+_TOOL_DETAIL_STYLE = Style(color="grey62")
+_HEADING_STYLE = Style(color="#c4b5fd", bold=True)
+_CODE_STYLE = Style(color="#fbbf24")
+_FENCE_STYLE = Style(color="grey42")
+_QUOTE_STYLE = Style(color="grey62", italic=True)
+_BOLD_STYLE = Style(bold=True)
+_ITALIC_STYLE = Style(italic=True)
+
+_TOOL_LINE_RE = re.compile(r"^● ([A-Za-z0-9_.:-]+)\((.*)\)$")
+_HEADING_RE = re.compile(r"^(\s*)#{1,6}\s+(.*)$")
+_BULLET_RE = re.compile(r"^(\s*)[-*+]\s+")
+_RULE_RE = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
+_INLINE_RE = re.compile(r"`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|(?<![\w*])\*(?!\s)([^*]+?)(?<!\s)\*(?![\w*])")
+
+
+def _append_inline_markdown(text: Text, body: str) -> None:
+    """Append ``body`` to ``text`` with inline code/bold/italic markers styled."""
+    position = 0
+    for match in _INLINE_RE.finditer(body):
+        text.append(body[position : match.start()])
+        code, bold, bold_alt, italic = match.groups()
+        if code is not None:
+            text.append(code, _CODE_STYLE)
+        elif italic is not None:
+            text.append(italic, _ITALIC_STYLE)
+        else:
+            text.append(bold if bold is not None else bold_alt, _BOLD_STYLE)
+        position = match.end()
+    text.append(body[position:])
+
+
+def style_transcript_lines(lines: list[str]) -> list[Text]:
+    """Return display text for transcript lines, rendering basic Markdown.
+
+    Lines come from ``transcript_lines``: a block starts with ``❯ `` (user
+    prompt) or ``● `` (agent text/tool) and continues with a two-space indent.
+    User prompts are shown verbatim; agent text gets inline and block Markdown.
+    """
+    styled: list[Text] = []
+    block = ""
+    in_fence = False
+
+    for line in lines:
+        if line.startswith("❯ "):
+            block, in_fence = "user", False
+            text = Text("❯ ", _MARKER_STYLE)
+            text.append(line[2:], _PROMPT_STYLE)
+            styled.append(text)
+            continue
+
+        tool = _TOOL_LINE_RE.match(line)
+        if tool:
+            block, in_fence = "tool", False
+            text = Text("● ", _TOOL_MARKER_STYLE)
+            text.append(tool.group(1), _TOOL_NAME_STYLE)
+            text.append(f"({tool.group(2)})", _TOOL_DETAIL_STYLE)
+            styled.append(text)
+            continue
+
+        if line.startswith("● "):
+            block, in_fence = "agent", False
+            text = Text("● ", _MARKER_STYLE)
+            body = line[2:]
+        elif line.startswith("  "):
+            text = Text("  ")
+            body = line[2:]
+        else:
+            styled.append(Text(line))
+            continue
+
+        if block == "user":
+            text.append(body, _PROMPT_STYLE)
+        elif body.lstrip().startswith(("```", "~~~")):
+            in_fence = not in_fence
+            text.append(body, _FENCE_STYLE)
+        elif in_fence:
+            text.append(body, _CODE_STYLE)
+        elif _RULE_RE.match(body):
+            text.append(body, _FENCE_STYLE)
+        elif heading := _HEADING_RE.match(body):
+            text.append(heading.group(1))
+            text.append(heading.group(2), _HEADING_STYLE)
+        elif body.lstrip().startswith(">"):
+            text.append(body, _QUOTE_STYLE)
+        else:
+            bullet = _BULLET_RE.match(body)
+            if bullet:
+                text.append(f"{bullet.group(1)}• ")
+                body = body[bullet.end() :]
+            _append_inline_markdown(text, body)
+        styled.append(text)
+
+    return styled
+
+
+def wrap_offsets(plain: str, width: int) -> list[int]:
+    """Return cut offsets that word-wrap ``plain`` to ``width`` cells."""
+    offsets: list[int] = []
+    start = 0
+    while len(plain) - start > width:
+        cut = plain.rfind(" ", start, start + width + 1)
+        cut = cut + 1 if cut > start else start + width
+        offsets.append(cut)
+        start = cut
+    return offsets
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +538,8 @@ class SnapshotViewer(ScrollView):
     def __init__(self, lines: list[str], comments_ref: list[tuple[int, int, str]] | None = None, **kwargs):
         super().__init__(**kwargs)
         self.snap_lines = lines
+        # True when snap_lines come from an agent transcript (Markdown source).
+        self.markdown = False
         self.comments_ref = comments_ref if comments_ref is not None else []
         self.sel_start: Optional[int] = None
         self.sel_end: Optional[int] = None
@@ -340,7 +555,7 @@ class SnapshotViewer(ScrollView):
         """Build row map with word-wrap support.
 
         Each row is one of:
-          ('line_chunk', (line_idx, chunk_idx, chunk_text))
+          ('line_chunk', (line_idx, chunk_idx, chunk_text: Text))
           ('annotation', (text,))
         """
         self._wrap_width = wrap_width
@@ -352,11 +567,16 @@ class SnapshotViewer(ScrollView):
         for s, e, text in self.comments_ref:
             after[e] = text
 
+        expanded = [line.replace("\t", "    ") for line in self.snap_lines]
+        if self.markdown:
+            display = style_transcript_lines(expanded)
+        else:
+            display = [Text(line) for line in expanded]
+
         rows: list[tuple[str, tuple]] = []
-        for i in range(len(self.snap_lines)):
-            content = self.snap_lines[i].replace("\t", "    ")
-            if avail > 0 and len(content) > avail:
-                chunks = textwrap.wrap(content, avail) or [""]
+        for i, content in enumerate(display):
+            if avail > 0 and content.cell_len > avail:
+                chunks = list(content.divide(wrap_offsets(content.plain, avail))) or [Text()]
             else:
                 chunks = [content]
             for ci, chunk in enumerate(chunks):
@@ -431,19 +651,20 @@ class SnapshotViewer(ScrollView):
             lineno_style = _LINENO_STYLE
 
         sep = " │ "
+        content_segments = list(content.render(self.app.console))
 
         if selected:
             segments = [
                 Segment(lineno_str, lineno_style + _SELECTED_STYLE),
                 Segment(sep, _SEP_STYLE + _SELECTED_STYLE),
-                Segment(content, _SELECTED_STYLE),
+                *Segment.apply_style(content_segments, post_style=_SELECTED_STYLE),
             ]
             strip = Strip(segments).extend_cell_length(width, _SELECTED_STYLE)
         else:
             segments = [
                 Segment(lineno_str, lineno_style),
                 Segment(sep, _SEP_STYLE),
-                Segment(content, _CONTENT_STYLE),
+                *Segment.apply_style(content_segments, _CONTENT_STYLE),
             ]
             strip = Strip(segments).extend_cell_length(width)
 
@@ -746,9 +967,10 @@ class ComposerApp(App[None]):
     ]
 
     class SnapshotReady(Message):
-        def __init__(self, lines: list[str]) -> None:
+        def __init__(self, lines: list[str], markdown: bool = False) -> None:
             super().__init__()
             self.lines = lines
+            self.markdown = markdown
 
     def __init__(self):
         super().__init__()
@@ -769,30 +991,39 @@ class ComposerApp(App[None]):
     async def _fetch_snapshot(self) -> None:
         import asyncio
         try:
-            lines = await asyncio.to_thread(self._do_fetch)
+            lines, markdown = await asyncio.to_thread(self._do_fetch)
         except Exception as e:
             debug_dir = os.environ.get("OCC_DEBUG_DIR", "")
             if debug_dir:
                 with open(os.path.join(debug_dir, "bash.log"), "a") as f:
                     f.write(f"py:fetch-exception {e}\n")
-            lines = [f"Error loading snapshot: {e}"]
-        self.post_message(self.SnapshotReady(lines))
+            lines, markdown = [f"Error loading snapshot: {e}"], False
+        self.post_message(self.SnapshotReady(lines, markdown))
 
-    def _do_fetch(self) -> list[str]:
+    def _do_fetch(self) -> tuple[list[str], bool]:
+        """Return (lines, is_markdown_transcript)."""
         # herdr only keeps the visible screen for fullscreen (alt-screen)
-        # agents, so prefer the full Claude transcript when there is one.
-        lines = self._fetch_claude_transcript()
-        return lines or self._fetch_pane_read()
+        # agents, so prefer the full agent transcript when there is one.
+        lines = self._fetch_transcript()
+        if lines:
+            return lines, True
+        return self._fetch_pane_read(), False
 
-    def _fetch_claude_transcript(self) -> list[str]:
+    def _fetch_transcript(self) -> list[str]:
         meta = load_meta_values()
-        if meta.get("AGENT", "claude") not in ("", "claude"):
+        session_id = meta.get("SESSION_ID", "")
+        agent = meta.get("AGENT", "")
+        if agent in ("", "claude"):
+            find, read = find_claude_transcript, read_claude_transcript
+        elif agent == "codex":
+            find, read = find_codex_transcript, read_codex_transcript
+        else:
             return []
-        path = find_claude_transcript(meta.get("SESSION_ID", ""))
+        path = find(session_id)
         if not path:
             return []
         try:
-            return read_claude_transcript(path)
+            return read(path)
         except OSError:
             return []
 
@@ -821,6 +1052,7 @@ class ComposerApp(App[None]):
         self.snap_lines = message.lines
         viewer = self.query_one("#viewer", SnapshotViewer)
         viewer.snap_lines = self.snap_lines
+        viewer.markdown = message.markdown
         viewer._kb_cursor = len(viewer.snap_lines) - 1 if viewer.snap_lines else 0
         viewer._refresh_row_map(viewer.size.width)
         self.screen.refresh(layout=True)
