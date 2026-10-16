@@ -971,6 +971,32 @@ class ConfirmScreen(ModalScreen[bool]):
 # App
 # ---------------------------------------------------------------------------
 
+def _register_round_dashed_border() -> str:
+    """Register a light dashed border with rounded corners; return its name.
+
+    Textual has no public API for custom borders, so this extends its
+    internal tables (verified on Textual 8.2). If they change, fall back to
+    the built-in heavy ``dashed`` border so the pane still opens.
+    """
+    try:
+        from textual import _border
+        from textual.css import constants
+
+        _border.BORDER_CHARS["round-dashed"] = (
+            ("╭", "╌", "╮"),
+            ("╎", " ", "╎"),
+            ("╰", "╌", "╯"),
+        )
+        _border.BORDER_LOCATIONS["round-dashed"] = _border.BORDER_LOCATIONS["round"]
+        _border.BORDER_LABEL_LOCATIONS["round-dashed"] = _border.BORDER_LABEL_LOCATIONS["round"]
+        constants.VALID_BORDER.add("round-dashed")
+        return "round-dashed"
+    except Exception:
+        return "dashed"
+
+
+_VIEWER_BORDER = _register_round_dashed_border()
+
 _APP_CSS = """
 Screen {
     background: transparent;
@@ -979,7 +1005,7 @@ Screen {
 
 #viewer {
     height: 1fr;
-    border: heavy #22c55e;
+    border: __VIEWER_BORDER__ #22c55e;
     overflow-x: hidden;
     scrollbar-size-vertical: 1;
 }
@@ -1026,7 +1052,7 @@ FooterKey {
     background: #312e81;
     color: #c7d2fe;
 }
-"""
+""".replace("__VIEWER_BORDER__", _VIEWER_BORDER)
 
 
 class ComposerApp(App[None]):
