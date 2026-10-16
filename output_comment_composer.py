@@ -934,7 +934,7 @@ class ConfirmScreen(ModalScreen[bool]):
     }
 
     #confirm-buttons Button {
-        margin: 0 1;
+        margin: 0 2;
     }
     """
 
@@ -947,8 +947,8 @@ class ConfirmScreen(ModalScreen[bool]):
         with Vertical(id="confirm-box"):
             yield Label(self.question, id="confirm-question")
             with Horizontal(id="confirm-buttons"):
-                yield Button("Voltar (n)", id="confirm-no", variant="primary")
-                yield Button(f"{self.confirm_label} (y)", id="confirm-yes", variant="error")
+                yield Button(" Voltar (n) ", id="confirm-no", variant="primary", compact=True)
+                yield Button(f" {self.confirm_label} (y) ", id="confirm-yes", variant="error", compact=True)
 
     def on_mount(self) -> None:
         self.query_one("#confirm-no", Button).focus()
