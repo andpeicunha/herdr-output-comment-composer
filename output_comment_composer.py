@@ -846,6 +846,32 @@ class SnapshotViewer(ScrollView):
             x_axis=False,
         )
 
+    def reveal_selection_for_editing(self) -> None:
+        """Keep the selected lines readable while the comment editor is open.
+
+        Center the selection when it fits the viewport; otherwise align its
+        first line to the top so the user can read it from the start.
+        """
+        if self.sel_start is None or self.sel_end is None:
+            return
+        first_rows = [
+            index
+            for index, (kind, value) in enumerate(self._row_map)
+            if kind == "line_chunk" and value[0] == self.sel_start
+        ]
+        last_row = self._line_to_row(self.sel_end)
+        if not first_rows or last_row is None:
+            return
+        first_row = first_rows[0]
+        height = last_row - first_row + 1
+        if height <= self.scrollable_content_region.height:
+            region = Region(0, first_row, max(1, self.size.width), height)
+            self.scroll_to_region(
+                region, center=True, animate=False, force=True, immediate=True, x_axis=False
+            )
+        else:
+            self.scroll_to(y=first_row, animate=False, force=True, immediate=True)
+
     def _scroll_kb_cursor_into_view(self) -> None:
         """Keep the keyboard cursor line visible in the viewport."""
         target_row = self._line_to_row(self._kb_cursor)
@@ -1214,6 +1240,14 @@ class ComposerApp(App[None]):
             inp.insert(existing_text)
         self._draft_original = existing_text
         inp.focus()
+        # Opening the panel shrinks the viewer, which can hide the selection
+        # behind it. Re-reveal the selection once the new layout is in place.
+        self.call_after_refresh(self._reveal_selection_after_open, viewer)
+
+    def _reveal_selection_after_open(self, viewer: SnapshotViewer) -> None:
+        viewer._refresh_row_map(viewer.size.width)
+        viewer.refresh(layout=True)
+        self.call_after_refresh(viewer.reveal_selection_for_editing)
 
     def on_snapshot_viewer_selection_completed(
         self, _message: SnapshotViewer.SelectionCompleted
