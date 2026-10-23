@@ -930,10 +930,12 @@ class CommentInput(TextArea):
     def on_key(self, event: Key) -> None:
         if event.key == "ctrl+c" and not self.selected_text:
             viewer = self.app.query_one("#viewer", SnapshotViewer)
-            if viewer.copy_selection():
-                event.stop()
-                event.prevent_default()
-                return
+            viewer.copy_selection()
+            # Textual's system Ctrl+C binding quits the app. Keep it from
+            # reaching that binding when there is no text selected in the input.
+            event.stop()
+            event.prevent_default()
+            return
         if event.key == "enter":
             self.insert("\n")
             event.stop()
