@@ -914,11 +914,15 @@ class SnapshotViewer(ScrollView):
 
 
 class CommentInput(TextArea):
-    """Multi-line TextArea with escape=cancel."""
+    """Multi-line TextArea with ctrl+s=save, escape=cancel."""
 
     BINDINGS = [
+        Binding("ctrl+s", "save_comment", "Save", show=False),
         Binding("escape", "cancel_comment", "Cancel", show=False),
     ]
+
+    def action_save_comment(self) -> None:
+        self.app.save_comment()  # type: ignore[attr-defined]
 
     def action_cancel_comment(self) -> None:
         self.app.cancel_comment()  # type: ignore[attr-defined]
@@ -1105,7 +1109,6 @@ class ComposerApp(App[None]):
 
     BINDINGS = [
         Binding("c", "open_comment", "comment", show=True),
-        Binding("ctrl+s", "save_comment_if_open", "Save comment", show=False),
         Binding("s", "send_comments", "send", show=True),
         Binding("q", "quit", "quit", show=True),
         Binding("escape", "quit", "quit", show=False),
@@ -1262,12 +1265,6 @@ class ComposerApp(App[None]):
         # Opening the panel shrinks the viewer, which can hide the selection
         # behind it. Re-reveal the selection once the new layout is in place.
         self.call_after_refresh(self._reveal_selection_after_open, viewer)
-
-    def action_save_comment_if_open(self) -> None:
-        """Save the draft while the editor is open; consume later Ctrl+S presses."""
-        panel = self.query_one("#comment-panel")
-        if "visible" in panel.classes:
-            self.save_comment()
 
     def _reveal_selection_after_open(self, viewer: SnapshotViewer) -> None:
         viewer._refresh_row_map(viewer.size.width)

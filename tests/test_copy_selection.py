@@ -67,26 +67,6 @@ class CopySelectionTests(unittest.TestCase):
         app.call_after_refresh.assert_called_once()
         app.exit.assert_not_called()
 
-    def test_ctrl_s_action_saves_when_editor_is_open(self):
-        app = Mock(spec=ComposerApp)
-        panel = Mock()
-        panel.classes = {"visible"}
-        app.query_one.return_value = panel
-
-        ComposerApp.action_save_comment_if_open(app)
-
-        app.save_comment.assert_called_once_with()
-
-    def test_ctrl_s_action_is_a_noop_after_editor_closes(self):
-        app = Mock(spec=ComposerApp)
-        panel = Mock()
-        panel.classes = set()
-        app.query_one.return_value = panel
-
-        ComposerApp.action_save_comment_if_open(app)
-
-        app.save_comment.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()
