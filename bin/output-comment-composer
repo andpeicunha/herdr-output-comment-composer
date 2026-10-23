@@ -1,22 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-meta="${OUTPUT_COMMENT_COMPOSER_META:-}"
-source_pane="${HERDR_PANE_ID:-unknown}"
-snapshot_file=""
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 plugin_dir=$(dirname -- "$script_dir")
 
-if [ -n "$meta" ] && [ -f "$meta" ]; then
-  # shellcheck disable=SC1090
-  . "$meta"
-  source_pane="${SOURCE_PANE_ID:-$source_pane}"
-  snapshot_file="${SNAPSHOT_FILE:-}"
-fi
-
-if ! python3 -c "import textual" 2>/dev/null; then
-  echo "output-comment-composer: textual not installed. Run: pip install textual" >&2
-  exit 1
-fi
-
-exec python3 "$plugin_dir/output_comment_composer.py"
+exec python3 "$plugin_dir/output_comment_composer_plain.py"

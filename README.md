@@ -1,38 +1,25 @@
 # output-comment-composer
 
-A [Herdr](https://herdr.io) plugin for annotating your AI agent's output inline.
-
-Opens a frozen snapshot of the agent's last response in a zoomed TUI pane. Select lines, add comments, and send them back as a structured prompt — without losing context or scrolling your session.
-
-![alt text](image.png)
+A keyboard-first [Herdr](https://herdr.io) plugin for reviewing agent output,
+adding inline comments, and sending structured feedback without leaving the
+terminal.
 
 ## Features
 
-- Captures the last assistant response via Claude Code JSONL session logs (no terminal scroll)
-- Falls back to `herdr pane read` for OpenCode, Cursor, Codex, or any other agent
-- Word-wrapped preview with internal scroll
-- Mouse drag to select lines; keyboard shortcuts for everything
-- UTF-8 / accented character support in comment input
+- Reads up to 800 recent lines from Codex or Claude JSONL transcripts.
+- Falls back to `herdr pane read` for other agents.
+- Organizes prompts, assistant output, tools, paragraphs, lists, quotes,
+  headings, and code into selectable blocks.
+- Wraps long content and comments without hiding the cursor.
+- Supports multiline comments, draft-discard confirmation, multi-block copy,
+  and structured feedback submission.
+- Uses Python's built-in `curses`; no Python package installation is needed.
 
 ## Requirements
 
-- [Herdr](https://herdr.io) ≥ 0.7.5
-- Python 3 with [Textual](https://github.com/Textualize/textual)
-
-The plugin will try to install Textual automatically on `herdr plugin install`.
-If that fails (e.g. pip is not available), install it manually:
-
-```sh
-# macOS / most Linux
-pip3 install textual
-
-# Ubuntu / Debian / WSL (if pip is not installed)
-sudo apt install python3-pip
-pip3 install textual
-
-# Ubuntu 24+ / externally-managed Python (PEP 668)
-pip3 install textual --break-system-packages
-```
+- [Herdr](https://herdr.io) 0.7.5 or newer.
+- Python 3 with `curses` support.
+- `jq` for the Herdr pane launcher.
 
 ## Installation
 
@@ -42,76 +29,64 @@ herdr plugin install andpeicunha/herdr-output-comment-composer
 
 ## Usage
 
-Bind the `toggle` action to a key in your Herdr config, then press it from any agent pane.
+Bind the `toggle` action in your Herdr configuration:
 
 ```toml
-# herdr config (config.toml)
-[[keybindings]]
-key = "c"
-modifiers = ["super", "shift"]
-action = { plugin = "andpeicunha.output-comment-composer", action_id = "toggle" }
+[[keys.command]]
+key = "prefix+c"
+type = "plugin_action"
+command = "andpeicunha.output-comment-composer.toggle"
+description = "output-comment-composer: toggle"
 ```
 
 ### Keys
 
 | Key | Action |
-|-----|--------|
-| Drag / click | Select lines |
-| `c` / `Enter` | Add comment to selection |
-| `Ctrl+C` | Copy selected snapshot lines while the comment editor is open |
-| `s` | Send all comments to the agent |
-| `j` / `↓` | Scroll down |
-| `k` / `↑` | Scroll up |
-| `d` / `u` | Half-page down / up |
-| `g` / `G` | Top / bottom |
-| Mouse wheel | Scroll |
-| `q` / `Esc` | Close |
+| --- | --- |
+| `↑` / `k` | Previous semantic block |
+| `↓` / `j` | Next semantic block |
+| `u` / `Page Up` | Move half a page up |
+| `d` / `Page Down` | Move half a page down |
+| `g` / `G` | First / last block |
+| `c` | Add or edit a comment |
+| `Enter` | Add a line inside the comment editor |
+| `Ctrl+S` | Save the open comment |
+| `Esc` | Cancel editing; confirm before discarding changes |
+| `Space` | Start or finish a multi-block selection |
+| `y` | Copy selected blocks through OSC 52 |
+| `s` | Send all comments to the source agent |
+| `q` | Close the composer |
 
-`Ctrl+C` copies the selected whole lines through the terminal's OSC 52 clipboard support. On WSL, the host terminal must allow OSC 52 clipboard writes.
+Use your terminal's paste shortcut, usually `Ctrl+Shift+V`, inside the comment
+editor.
 
 ## How it works
 
-1. On toggle, the plugin reads the agent's last response (Claude Code: from `~/.claude/projects/<session>.jsonl`; others: via `herdr pane read`)
-2. Opens a zoomed pane with a frozen snapshot of that response
-3. You select lines and type comments. Press `Ctrl+C` in the comment editor to copy those lines without line numbers or pane decorations.
-4. On `s`, the plugin sends a structured prompt back to the original agent pane
+1. The plugin reads the current agent session metadata from Herdr.
+2. Codex and Claude sessions are loaded from their local JSONL transcripts.
+3. Recent content is split into semantic Markdown blocks and shown in a zoomed
+   `curses` pane.
+4. Comments stay in memory until `s` sends a structured prompt through Herdr.
 
-### Privacy and data flow
+The plugin does not call an external API. The configured agent may have its own
+network access after it receives the feedback prompt.
 
-The plugin does not call an external API or upload the captured response by
-itself. It reads local session data or the local Herdr pane, displays a frozen
-snapshot, and sends the resulting comment prompt back through Herdr to the
-agent pane. The agent or tools configured by the user may have their own
-network access; that behavior is outside this plugin.
+## Supported sources
 
-The plugin may read:
+| Agent | Source |
+| --- | --- |
+| Codex | `~/.codex/sessions/**/*.jsonl` |
+| Claude Code | `~/.claude/projects/**/*.jsonl` |
+| Other agents | `herdr pane read` fallback |
 
-- Claude Code session files under `~/.claude/projects/`;
-- the local OpenCode database under `~/.local/share/opencode/`;
-- the current Herdr pane output.
+## Development
 
-Do not use it on a session containing information you are not allowed to expose
-to the configured agent.
+```sh
+python3 -m unittest discover -s tests -v
+```
 
-## Status and limitations
+For local testing:
 
-This is an early open-source plugin for Herdr. The core prompt-building path
-has a basic unit test, but the Textual UI and integrations with Claude Code,
-OpenCode, and Herdr still require manual validation in a real session.
-
-Known limitations:
-
-- snapshot extraction depends on the output formats of the supported agents;
-- the fallback for unknown agents is limited to the last 80 pane lines;
-- Python 3, Textual, Herdr, and `jq` must be available in the runtime
-  environment;
-- dependency installation may require a user-managed Python environment on
-  systems that enforce PEP 668.
-
-## Supported agents
-
-| Agent | Snapshot source |
-|-------|----------------|
-| Claude Code | JSONL session log (no scroll side-effect) |
-| OpenCode | `herdr pane read` + TUI pattern extraction |
-| Others | `herdr pane read` + last 80 lines fallback |
+```sh
+herdr plugin link .
+```
