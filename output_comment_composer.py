@@ -621,7 +621,11 @@ class SnapshotViewer(ScrollView):
             text = str(value[0]).replace("\n", " ")
             if len(text) > avail:
                 text = text[:avail - 1] + "…"
-            annotation_style = Style(color="yellow", italic=True)
+            annotation_style = Style(
+                color="yellow",
+                bgcolor=Color.parse("#263238"),
+                italic=True,
+            )
             seg = Segment(prefix + text, annotation_style)
             strip = Strip([seg]).extend_cell_length(width, annotation_style)
             return strip.crop(0, width)
@@ -808,6 +812,16 @@ class SnapshotViewer(ScrollView):
     def has_selection(self) -> bool:
         return self.sel_start is not None and self.sel_end is not None
 
+    def copy_selection(self) -> bool:
+        """Copy the selected snapshot lines without viewer decorations."""
+        if not self.has_selection():
+            return False
+        assert self.sel_start is not None and self.sel_end is not None
+        selected = "\n".join(self.snap_lines[self.sel_start : self.sel_end + 1])
+        self.app.copy_to_clipboard(selected)
+        self.app.notify("Snapshot text copied", severity="information")
+        return True
+
     def _line_to_row(self, line_idx: int) -> Optional[int]:
         """Return the row in ``_row_map`` for ``line_idx`` (annotation row if present)."""
         line_rows = [
@@ -914,6 +928,12 @@ class CommentInput(TextArea):
         self.app.cancel_comment()  # type: ignore[attr-defined]
 
     def on_key(self, event: Key) -> None:
+        if event.key == "ctrl+c" and not self.selected_text:
+            viewer = self.app.query_one("#viewer", SnapshotViewer)
+            if viewer.copy_selection():
+                event.stop()
+                event.prevent_default()
+                return
         if event.key == "enter":
             self.insert("\n")
             event.stop()

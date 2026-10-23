@@ -58,6 +58,7 @@ action = { plugin = "andpeicunha.output-comment-composer", action_id = "toggle" 
 |-----|--------|
 | Drag / click | Select lines |
 | `c` / `Enter` | Add comment to selection |
+| `Ctrl+C` | Copy selected snapshot lines while the comment editor is open |
 | `s` | Send all comments to the agent |
 | `j` / `↓` | Scroll down |
 | `k` / `↑` | Scroll up |
@@ -66,11 +67,13 @@ action = { plugin = "andpeicunha.output-comment-composer", action_id = "toggle" 
 | Mouse wheel | Scroll |
 | `q` / `Esc` | Close |
 
+`Ctrl+C` copies the selected whole lines through the terminal's OSC 52 clipboard support. On WSL, the host terminal must allow OSC 52 clipboard writes.
+
 ## How it works
 
 1. On toggle, the plugin reads the agent's last response (Claude Code: from `~/.claude/projects/<session>.jsonl`; others: via `herdr pane read`)
 2. Opens a zoomed pane with a frozen snapshot of that response
-3. You select lines and type comments
+3. You select lines and type comments. Press `Ctrl+C` in the comment editor to copy those lines without line numbers or pane decorations.
 4. On `s`, the plugin sends a structured prompt back to the original agent pane
 
 ### Privacy and data flow
