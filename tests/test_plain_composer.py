@@ -6,7 +6,6 @@ from output_comment_composer_plain import (
     build_display_rows,
     build_prompt,
     codex_transcript_blocks,
-    comment_box_preview,
     comment_preview,
     content_rows_available,
     editor_cursor_position,
@@ -283,15 +282,6 @@ class PlainComposerTests(unittest.TestCase):
         rows = build_display_rows(["abcdefghij"], {}, width=4, no_wrap={0})
 
         self.assertEqual(rows, [("line", 0, "abcd")])
-
-    def test_comment_box_preview_fits_short_comment(self):
-        self.assertEqual(comment_box_preview("one\ntwo", width=10, rows=3), ["one", "two"])
-
-    def test_comment_box_preview_marks_cut_text(self):
-        self.assertEqual(
-            comment_box_preview("a\nb\ncccccc\nd", width=4, rows=3),
-            ["a", "b", "ccc…"],
-        )
 
     def test_comment_preview_flattens_and_truncates_block(self):
         self.assertEqual(comment_preview("short\n  block"), "short block")
