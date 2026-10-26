@@ -19,6 +19,8 @@ _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]
 _TRANSCRIPT_MAX_LINES = 800
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMMENT_PREFIX = "  ╰─ comment: "
+# Docked comment box: top divider, three text rows, and the frame's bottom edge.
+_COMMENT_BOX_HEIGHT = 5
 # Markdown pipe rows, or tables already drawn with box characters by the agent UI.
 _TABLE_ROW_PREFIXES = ("|", "│", "┌", "├", "└", "┏", "┣", "┗", "╭", "╰")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
@@ -480,6 +482,16 @@ def editor_cursor_position(
     return index, column - start
 
 
+def comment_box_preview(comment: str, width: int, rows: int) -> list[str]:
+    """Soft-wrap a saved comment into at most ``rows`` rows, marking cut text."""
+    visual = [text for _row, _start, text in editor_visual_rows(comment.splitlines() or [""], width)]
+    if len(visual) <= rows:
+        return visual
+    kept = visual[:rows]
+    kept[-1] = kept[-1][: max(0, width - 1)] + "…"
+    return kept
+
+
 def build_prompt(lines: list[str], comments: dict[int, str]) -> str:
     parts = ["Please address these comments on your previous output:"]
     for number, line_index in enumerate(sorted(comments), 1):
@@ -527,6 +539,9 @@ def send_comments(
 
 def comment_preview(block: str, limit: int = 40) -> str:
     """Return a one-line, truncated preview of the commented block."""
+    if is_markdown_table(block):
+        header = block.splitlines()[0].strip().strip("|").split("|")
+        block = " · ".join(_strip_inline_markup(cell.strip()) for cell in header)
     text = " ".join(block.split())
     if len(text) <= limit:
         return text
@@ -570,6 +585,11 @@ class PlainComposer:
         self.status = ""
         self.sent = False
         self.colors: dict[str, int] = {}
+        # Typing state for the docked comment box; None while navigating.
+        self.edit_buffer: list[str] | None = None
+        self.edit_row = 0
+        self.edit_col = 0
+        self.edit_top = 0
 
     def run(self, screen: curses.window) -> None:
         curses.curs_set(0)
@@ -614,7 +634,7 @@ class PlainComposer:
                 self.cursor = 0
             elif key == ord("G"):
                 self.cursor = len(self.lines) - 1
-            elif key == ord("c"):
+            elif key in (ord("c"), ord("\n"), ord("\r"), curses.KEY_ENTER):
                 self.edit_comment(screen)
             elif key == ord(" "):
                 self.toggle_selection()
@@ -689,17 +709,16 @@ class PlainComposer:
         _safe_addnstr(screen, max(1, height // 2), x, message, width - x - 1, curses.A_BOLD)
         screen.refresh()
 
-    def draw(self, screen: curses.window, reserved_bottom: int = 0) -> None:
+    def draw(self, screen: curses.window) -> None:
         screen.erase()
         height, width = screen.getmaxyx()
-        viewer_height = height - reserved_bottom
+        viewer_height = height - _COMMENT_BOX_HEIGHT
         if viewer_height < 8 or width < 30:
             _safe_addnstr(screen, 0, 0, "Pane too small", width - 1, curses.A_BOLD)
             screen.refresh()
             return
 
-        # The open editor box draws its own top edge, which closes the frame.
-        inner_bottom = viewer_height - 1 if reserved_bottom else height - 2
+        inner_bottom = viewer_height - 1
         inner_width = width - 2
         border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
         _draw_heavy_box(screen, border_attr)
@@ -756,7 +775,7 @@ class PlainComposer:
             for index, (kind, line_index, _) in enumerate(rows)
             if kind == "line" and line_index == self.cursor
         )
-        available = content_rows_available(height, reserved_bottom)
+        available = content_rows_available(height, _COMMENT_BOX_HEIGHT)
         top = max(0, selected_row - available // 2)
         top = min(top, max(0, len(rows) - available))
 
@@ -817,7 +836,7 @@ class PlainComposer:
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
         _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
-        footer = " ↑/↓ move · Space select · y copy · c comment · s send · q close "
+        footer = " ↑/↓ move · Space select · y copy · c/Enter comment · s send · q close "
         _safe_addnstr(
             screen,
             inner_bottom,
@@ -826,94 +845,119 @@ class PlainComposer:
             inner_width,
             self.style("footer", curses.A_REVERSE),
         )
+        self.draw_comment_box(screen, viewer_height, border_attr)
         screen.refresh()
 
-    def edit_comment(self, screen: curses.window) -> None:
+    def draw_comment_box(self, screen: curses.window, top: int, border_attr: int) -> None:
+        """Draw the docked box: a preview while navigating, the editor while typing."""
         height, width = screen.getmaxyx()
-        box_width = width
-        box_height = 5
-        box_x = 0
-        box_y = max(0, height - box_height)
-        border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
+        inner_height = _COMMENT_BOX_HEIGHT - 2
+        inner_width = width - 4
+        # Divider joined to the pane frame; the frame supplies the sides and bottom.
+        _safe_addnstr(screen, top, 0, "┣" + "━" * (width - 2) + "┫", width, border_attr)
         badge = " ✎ COMMENT "
-        preview = comment_preview(self.lines[self.cursor])
-        self.draw(screen, reserved_bottom=box_height)
-        editor = curses.newwin(box_height, box_width, box_y, box_x)
-        editor.keypad(True)
+        _safe_addnstr(
+            screen,
+            top,
+            2,
+            badge,
+            width - 4,
+            self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
+        )
+        label_x = 2 + len(badge)
+        _safe_addnstr(
+            screen,
+            top,
+            label_x,
+            f" {comment_preview(self.lines[self.cursor])} ",
+            width - label_x - 2,
+            border_attr,
+        )
+
+        if self.edit_buffer is None:
+            comment = self.comments.get(self.cursor)
+            if comment:
+                rows = comment_box_preview(comment, inner_width, inner_height)
+                text_attr = self.style("comment", curses.A_BOLD)
+            else:
+                rows = ["Press c or Enter to comment on this block"]
+                text_attr = self.style("muted")
+            for offset, text in enumerate(rows, 1):
+                _safe_addnstr(screen, top + offset, 2, text, inner_width, text_attr)
+            help_text = " c/Enter comment "
+            cursor_yx = None
+        else:
+            visual_rows = editor_visual_rows(self.edit_buffer, inner_width)
+            cursor_row, cursor_col = editor_cursor_position(
+                visual_rows, self.edit_row, self.edit_col
+            )
+            if cursor_row < self.edit_top:
+                self.edit_top = cursor_row
+            elif cursor_row >= self.edit_top + inner_height:
+                self.edit_top = cursor_row - inner_height + 1
+            for offset, (_logical, _start, text) in enumerate(
+                visual_rows[self.edit_top : self.edit_top + inner_height], 1
+            ):
+                _safe_addnstr(screen, top + offset, 2, text, inner_width)
+            help_text = (
+                " Ctrl+S save · Tab next · Shift+Tab prev · Enter new line · Esc cancel "
+            )
+            cursor_yx = (
+                top + 1 + cursor_row - self.edit_top,
+                2 + min(cursor_col, inner_width - 1),
+            )
+        _safe_addnstr(screen, height - 1, 2, help_text, width - 4, self.style("muted"))
+        if cursor_yx is not None:
+            try:
+                screen.move(*cursor_yx)
+            except curses.error:
+                pass
+
+    def load_edit_buffer(self) -> str:
+        """Start typing on the current block; return its saved comment."""
         original = self.comments.get(self.cursor, "")
-        buffer = original.splitlines() or [""]
-        row = len(buffer) - 1
-        col = len(buffer[row])
-        visual_top = 0
-        saved = False
+        self.edit_buffer = original.splitlines() or [""]
+        self.edit_row = len(self.edit_buffer) - 1
+        self.edit_col = len(self.edit_buffer[self.edit_row])
+        self.edit_top = 0
+        return original
+
+    def save_edit_buffer(self) -> None:
+        text = "\n".join(self.edit_buffer or []).strip()
+        if text:
+            self.comments[self.cursor] = text
+            self.status = f"Comment saved on block {self.cursor + 1}"
+        elif self.comments.pop(self.cursor, None) is not None:
+            self.status = f"Comment removed from block {self.cursor + 1}"
+
+    def edit_comment(self, screen: curses.window) -> None:
+        original = self.load_edit_buffer()
         curses.curs_set(1)
         try:
             while True:
-                editor.erase()
-                _draw_heavy_box(editor, border_attr)
-                # Join the editor's top edge to the pane frame above it.
-                _safe_addnstr(editor, 0, 0, "┣", 1, border_attr)
-                _safe_addnstr(editor, 0, box_width - 1, "┫", 1, border_attr)
-                _safe_addnstr(
-                    editor,
-                    0,
-                    2,
-                    badge,
-                    box_width - 4,
-                    self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
-                )
-                label_x = 2 + len(badge)
-                _safe_addnstr(
-                    editor,
-                    0,
-                    label_x,
-                    f" {preview} ",
-                    box_width - label_x - 2,
-                    border_attr,
-                )
-                inner_height = box_height - 2
-                inner_width = box_width - 4
-                visual_rows = editor_visual_rows(buffer, inner_width)
-                cursor_visual_row, cursor_visual_col = editor_cursor_position(
-                    visual_rows, row, col
-                )
-                if cursor_visual_row < visual_top:
-                    visual_top = cursor_visual_row
-                elif cursor_visual_row >= visual_top + inner_height:
-                    visual_top = cursor_visual_row - inner_height + 1
-                for screen_row, (_logical, _start, text_line) in enumerate(
-                    visual_rows[visual_top : visual_top + inner_height], 1
-                ):
-                    _safe_addnstr(editor, screen_row, 2, text_line, box_width - 4)
-                help_text = " Ctrl+S save · Enter new line · Esc cancel "
-                _safe_addnstr(
-                    editor,
-                    box_height - 1,
-                    2,
-                    help_text,
-                    box_width - 4,
-                    self.style("muted"),
-                )
-                cursor_y = 1 + cursor_visual_row - visual_top
-                cursor_x = 2 + min(cursor_visual_col, box_width - 5)
-                try:
-                    editor.move(cursor_y, cursor_x)
-                except curses.error:
-                    pass
-                editor.refresh()
-                key = editor.get_wch()
+                self.draw(screen)
+                key = screen.get_wch()
+                buffer = self.edit_buffer
+                row, col = self.edit_row, self.edit_col
                 if key == "\x13":
-                    saved = True
-                    break
+                    self.save_edit_buffer()
+                    return
+                if key in ("\t", curses.KEY_BTAB):
+                    # Save, then keep typing on the next/previous block.
+                    self.save_edit_buffer()
+                    step = 1 if key == "\t" else -1
+                    self.cursor = min(max(0, self.cursor + step), len(self.lines) - 1)
+                    original = self.load_edit_buffer()
+                    continue
                 if key == "\x1b":
                     current = "\n".join(buffer)
-                    if not needs_discard_confirmation(original, current):
-                        break
-                    curses.curs_set(0)
-                    if self.confirm_discard(screen):
-                        break
-                    curses.curs_set(1)
-                    continue
+                    if needs_discard_confirmation(original, current):
+                        curses.curs_set(0)
+                        if not self.confirm_discard(screen):
+                            curses.curs_set(1)
+                            continue
+                    self.status = "Comment edit cancelled"
+                    return
                 if key in ("\n", "\r", curses.KEY_ENTER):
                     remainder = buffer[row][col:]
                     buffer[row] = buffer[row][:col]
@@ -950,18 +994,10 @@ class PlainComposer:
                 elif isinstance(key, str) and key.isprintable():
                     buffer[row] = buffer[row][:col] + key + buffer[row][col:]
                     col += len(key)
+                self.edit_row, self.edit_col = row, col
         finally:
+            self.edit_buffer = None
             curses.curs_set(0)
-        if not saved:
-            self.status = "Comment edit cancelled"
-            return
-        text = "\n".join(buffer).strip()
-        if text:
-            self.comments[self.cursor] = text
-            self.status = f"Comment saved on line {self.cursor + 1}"
-        else:
-            self.comments.pop(self.cursor, None)
-            self.status = f"Comment removed from line {self.cursor + 1}"
 
     def confirm_discard(self, screen: curses.window) -> bool:
         """Return True only when the user explicitly confirms discard."""

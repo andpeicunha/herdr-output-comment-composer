@@ -6,6 +6,7 @@ from output_comment_composer_plain import (
     build_display_rows,
     build_prompt,
     codex_transcript_blocks,
+    comment_box_preview,
     comment_preview,
     content_rows_available,
     editor_cursor_position,
@@ -283,9 +284,24 @@ class PlainComposerTests(unittest.TestCase):
 
         self.assertEqual(rows, [("line", 0, "abcd")])
 
+    def test_comment_box_preview_fits_short_comment(self):
+        self.assertEqual(comment_box_preview("one\ntwo", width=10, rows=3), ["one", "two"])
+
+    def test_comment_box_preview_marks_cut_text(self):
+        self.assertEqual(
+            comment_box_preview("a\nb\ncccccc\nd", width=4, rows=3),
+            ["a", "b", "ccc…"],
+        )
+
     def test_comment_preview_flattens_and_truncates_block(self):
         self.assertEqual(comment_preview("short\n  block"), "short block")
         self.assertEqual(comment_preview("a" * 50, limit=10), "aaaaaaaaa…")
+
+    def test_comment_preview_uses_table_header_cells(self):
+        self.assertEqual(
+            comment_preview("| **Item** | Status |\n|---|---|\n| a | b |"),
+            "Item · Status",
+        )
 
 
 if __name__ == "__main__":

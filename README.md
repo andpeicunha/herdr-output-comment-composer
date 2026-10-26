@@ -9,7 +9,10 @@ terminal.
 - Reads up to 800 recent lines from Codex or Claude JSONL transcripts.
 - Falls back to `herdr pane read` for other agents.
 - Organizes prompts, assistant output, tools, paragraphs, lists, quotes,
-  headings, and code into selectable blocks.
+  headings, tables, and code into selectable blocks.
+- Renders Markdown tables with aligned columns, truncating wide cells.
+- Keeps a comment box docked at the bottom that previews the current block's
+  comment, so you can review and write comments block by block.
 - Wraps long content and comments without hiding the cursor.
 - Supports multiline comments, draft-discard confirmation, multi-block copy,
   and structured feedback submission.
@@ -48,9 +51,10 @@ description = "output-comment-composer: toggle"
 | `u` / `Page Up` | Move half a page up |
 | `d` / `Page Down` | Move half a page down |
 | `g` / `G` | First / last block |
-| `c` | Add or edit a comment |
+| `c` / `Enter` | Start typing a comment for the current block |
 | `Enter` | Add a line inside the comment editor |
-| `Ctrl+S` | Save the open comment |
+| `Tab` / `Shift+Tab` | Save and keep typing on the next / previous block |
+| `Ctrl+S` | Save the open comment and return to navigation |
 | `Esc` | Cancel editing; confirm before discarding changes |
 | `Space` | Start or finish a multi-block selection |
 | `y` | Copy selected blocks through OSC 52 |
