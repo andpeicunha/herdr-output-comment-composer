@@ -51,7 +51,7 @@ class PlainComposerTests(unittest.TestCase):
             [
                 ("line", 0, "one"),
                 ("comment", 0, "first"),
-                ("comment", 0, "second"),
+                ("comment_continuation", 0, "second"),
             ],
         )
 
@@ -72,7 +72,7 @@ class PlainComposerTests(unittest.TestCase):
         self.assertTrue(needs_discard_confirmation("", "new draft"))
 
     def test_editor_space_is_removed_from_viewer_height(self):
-        self.assertEqual(content_rows_available(40), 34)
+        self.assertEqual(content_rows_available(40), 33)
         self.assertEqual(content_rows_available(40, reserved_bottom=12), 22)
         self.assertEqual(content_rows_available(8, reserved_bottom=8), 1)
 
@@ -222,6 +222,14 @@ class PlainComposerTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(error, "")
         self.assertEqual(run.call_args.args[0][1:4], ["agent", "prompt", "pane-1"])
+
+    def test_wrapped_comment_continues_without_prefix_row(self):
+        rows = build_display_rows(["one"], {0: "alpha beta gamma"}, width=20)
+
+        self.assertEqual(
+            [kind for kind, _index, _text in rows],
+            ["line", "comment", "comment_continuation", "comment_continuation"],
+        )
 
     def test_comment_preview_flattens_and_truncates_block(self):
         self.assertEqual(comment_preview("short\n  block"), "short block")

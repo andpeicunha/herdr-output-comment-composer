@@ -18,6 +18,7 @@ _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]\s)")
 _TRANSCRIPT_MAX_LINES = 800
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_COMMENT_PREFIX = "  ╰─ comment: "
 
 
 def load_meta() -> dict[str, str]:
@@ -288,10 +289,14 @@ def build_display_rows(
                 first_row = False
         if index in comments:
             comment_lines = comments[index].splitlines() or [""]
+            comment_width = max(1, width - len(_COMMENT_PREFIX))
+            first_comment_row = True
             for comment_line in comment_lines:
-                wrapped = textwrap.wrap(comment_line, width=max(1, width - 8)) if width > 0 else [comment_line]
+                wrapped = textwrap.wrap(comment_line, width=comment_width) if width > 0 else [comment_line]
                 for wrapped_line in wrapped or [""]:
-                    rows.append(("comment", index, wrapped_line))
+                    kind = "comment" if first_comment_row else "comment_continuation"
+                    rows.append((kind, index, wrapped_line))
+                    first_comment_row = False
         if spacing and index + 1 < len(lines) and index not in (compact_after or set()):
             rows.append(("spacer", index, ""))
     return rows
@@ -362,8 +367,12 @@ def needs_discard_confirmation(original: str, current: str) -> bool:
 
 
 def content_rows_available(total_height: int, reserved_bottom: int = 0) -> int:
-    """Return viewer rows after headers, status, footer, and editor space."""
-    return max(1, total_height - reserved_bottom - 6)
+    """Return viewer rows after frame, headers, status, footer, and editor space.
+
+    The editor box replaces the frame's bottom edge while it is open.
+    """
+    frame_bottom = 0 if reserved_bottom else 1
+    return max(1, total_height - reserved_bottom - frame_bottom - 6)
 
 
 def selected_color_pair(color_count: int) -> tuple[int, int]:
@@ -576,7 +585,6 @@ class PlainComposer:
         curses.use_default_colors()
         color_count = getattr(curses, "COLORS", 0)
         pairs = {
-            "header": (curses.COLOR_CYAN, -1),
             "selected": selected_color_pair(color_count),
             "comment": (curses.COLOR_YELLOW, -1),
             "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
@@ -622,19 +630,32 @@ class PlainComposer:
             screen.refresh()
             return
 
-        title = " Output Comment Composer "
+        # The open editor box draws its own top edge, which closes the frame.
+        inner_bottom = viewer_height - 1 if reserved_bottom else height - 2
+        inner_width = width - 2
+        border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
+        _draw_rounded_box(screen, border_attr)
+        badge = " ✎ COMMENTS "
         _safe_addnstr(
             screen,
             0,
+            2,
+            badge,
+            width - 4,
+            self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
+        )
+        _safe_addnstr(
+            screen,
             0,
-            title.ljust(width - 1),
-            width - 1,
-            self.style("header", curses.A_BOLD) | curses.A_BOLD,
+            2 + len(badge),
+            " Output Comment Composer ",
+            width - len(badge) - 4,
+            border_attr,
         )
         position = f"block {self.cursor + 1}/{len(self.lines)}"
         meta = f" source {self.source_pane}  ·  {len(self.comments)} comment(s)  ·  {position} "
-        _safe_addnstr(screen, 1, 0, meta, width - 1, self.style("muted"))
-        _safe_addnstr(screen, 2, 0, "─" * (width - 1), width - 1, self.style("muted"))
+        _safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
+        _safe_addnstr(screen, 2, 1, "─" * inner_width, inner_width, self.style("muted"))
 
         markdown = format_markdown_lines(self.lines)
         rendered_blocks = [
@@ -651,7 +672,7 @@ class PlainComposer:
         rows = build_display_rows(
             rendered_blocks,
             self.comments,
-            width=max(1, width - 4),
+            width=max(1, width - 6),
             spacing=True,
             compact_after=compact_after,
         )
@@ -668,14 +689,14 @@ class PlainComposer:
         for y, (kind, line_index, text) in enumerate(rows[top : top + available], 3):
             if kind == "spacer":
                 continue
-            if kind == "comment":
-                value = f"  ╰─ comment: {text}"
+            if kind in ("comment", "comment_continuation"):
+                prefix = _COMMENT_PREFIX if kind == "comment" else " " * len(_COMMENT_PREFIX)
                 _safe_addnstr(
                     screen,
                     y,
-                    0,
-                    value,
-                    width - 1,
+                    1,
+                    prefix + text,
+                    inner_width,
                     self.style("comment", curses.A_BOLD) | curses.A_BOLD,
                 )
                 continue
@@ -702,33 +723,33 @@ class PlainComposer:
                     fallback = curses.A_BOLD if markdown_kind == "heading" else 0
                     content_attr = self.style(markdown_kind, fallback)
                 gutter_attr = self.style("marker" if block_kind != "tool" else "tool")
-            _safe_addnstr(screen, y, 0, prefix, len(prefix), gutter_attr)
+            _safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
             _safe_addnstr(
                 screen,
                 y,
-                len(prefix),
+                1 + len(prefix),
                 text,
-                width - len(prefix) - 1,
+                inner_width - len(prefix),
                 content_attr,
             )
 
         _safe_addnstr(
             screen,
-            viewer_height - 3,
-            0,
-            "─" * (width - 1),
-            width - 1,
+            inner_bottom - 2,
+            1,
+            "─" * inner_width,
+            inner_width,
             self.style("muted"),
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
-        _safe_addnstr(screen, viewer_height - 2, 1, self.status, width - 2, status_attr)
+        _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
         footer = " ↑/↓ move · Space select · y copy · c comment · s send · q close "
         _safe_addnstr(
             screen,
-            viewer_height - 1,
-            0,
-            footer.ljust(width - 1),
-            width - 1,
+            inner_bottom,
+            1,
+            footer.ljust(inner_width),
+            inner_width,
             self.style("footer", curses.A_REVERSE),
         )
         screen.refresh()
@@ -756,6 +777,9 @@ class PlainComposer:
             while True:
                 editor.erase()
                 _draw_rounded_box(editor, border_attr)
+                # Join the editor's top edge to the pane frame above it.
+                _safe_addnstr(editor, 0, 0, "├", 1, border_attr)
+                _safe_addnstr(editor, 0, box_width - 1, "┤", 1, border_attr)
                 _safe_addnstr(
                     editor,
                     0,
