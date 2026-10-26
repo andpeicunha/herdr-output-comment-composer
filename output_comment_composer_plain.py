@@ -19,6 +19,9 @@ _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]
 _TRANSCRIPT_MAX_LINES = 800
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMMENT_PREFIX = "  ╰─ comment: "
+# Markdown pipe rows, or tables already drawn with box characters by the agent UI.
+_TABLE_ROW_PREFIXES = ("|", "│", "┌", "├", "└", "┏", "┣", "┗", "╭", "╰")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 
 
 def load_meta() -> dict[str, str]:
@@ -198,6 +201,7 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
     blocks: list[str] = []
     paragraph: list[str] = []
     code: list[str] = []
+    table: list[str] = []
     in_code = False
 
     def flush_paragraph() -> None:
@@ -205,8 +209,18 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
             blocks.append(" ".join(part.strip() for part in paragraph if part.strip()))
             paragraph.clear()
 
+    def flush_table() -> None:
+        if table:
+            blocks.append("\n".join(table))
+            table.clear()
+
     for line in lines:
         stripped = line.strip()
+        if not in_code and stripped.startswith(_TABLE_ROW_PREFIXES):
+            flush_paragraph()
+            table.append(stripped)
+            continue
+        flush_table()
         if stripped.startswith(("```", "~~~")):
             flush_paragraph()
             code.append(line)
@@ -228,6 +242,7 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
         paragraph.append(line)
 
     flush_paragraph()
+    flush_table()
     if code:
         blocks.append("\n".join(code))
     return blocks
@@ -267,22 +282,24 @@ def build_display_rows(
     width: int = 0,
     spacing: bool = False,
     compact_after: set[int] | None = None,
+    no_wrap: set[int] | None = None,
 ) -> list[tuple[str, int, str]]:
     rows: list[tuple[str, int, str]] = []
     for index, line in enumerate(lines):
         first_row = True
         physical_lines = line.splitlines() or [""]
         for physical_line in physical_lines:
-            wrapped = (
-                textwrap.wrap(
+            if width <= 0:
+                wrapped = [physical_line]
+            elif index in (no_wrap or set()):
+                wrapped = [physical_line[:width]]
+            else:
+                wrapped = textwrap.wrap(
                     physical_line,
                     width=max(1, width),
                     replace_whitespace=False,
                     drop_whitespace=False,
                 )
-                if width > 0
-                else [physical_line]
-            )
             for wrapped_line in wrapped or [""]:
                 kind = "line" if first_row else "continuation"
                 rows.append((kind, index, wrapped_line.rstrip()))
@@ -318,12 +335,64 @@ def copy_blocks_to_clipboard(blocks: list[str], start: int, end: int) -> None:
     os.write(1, f"\x1b]52;c;{encoded}\a".encode("ascii"))
 
 
-def format_markdown_lines(lines: list[str]) -> list[tuple[str, str]]:
+def _strip_inline_markup(text: str) -> str:
+    clean = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
+    return re.sub(r"`([^`]+)`", r"\1", clean)
+
+
+def is_markdown_table(block: str) -> bool:
+    rows = block.splitlines()
+    return bool(rows) and all(row.strip().startswith("|") for row in rows)
+
+
+def render_markdown_table(block: str, width: int = 0) -> str:
+    """Align pipe-table columns, truncating the widest ones to fit ``width``."""
+    rows: list[list[str] | None] = []
+    for raw in block.splitlines():
+        cells = [cell.strip() for cell in raw.strip().strip("|").split("|")]
+        if all(_TABLE_SEPARATOR_CELL_RE.match(cell) for cell in cells):
+            rows.append(None)
+        else:
+            rows.append([_strip_inline_markup(cell) for cell in cells])
+    data = [row for row in rows if row is not None]
+    if not data:
+        return block
+    columns = max(len(row) for row in data)
+    for row in data:
+        row.extend([""] * (columns - len(row)))
+    widths = [max(len(row[column]) for row in data) for column in range(columns)]
+    total = sum(widths) + 3 * (columns - 1)
+    while width > 0 and total > width and max(widths) > 1:
+        widest = widths.index(max(widths))
+        widths[widest] -= 1
+        total -= 1
+
+    def fit(cell: str, size: int) -> str:
+        if len(cell) > size:
+            cell = cell[: max(0, size - 1)] + "…"
+        return cell.ljust(size)
+
+    rendered = []
+    for row in rows:
+        if row is None:
+            rendered.append("─┼─".join("─" * size for size in widths))
+        else:
+            rendered.append(" │ ".join(fit(cell, size) for cell, size in zip(row, widths)).rstrip())
+    return "\n".join(rendered)
+
+
+def format_markdown_lines(lines: list[str], width: int = 0) -> list[tuple[str, str]]:
     """Return simplified terminal text and a whole-line Markdown style name."""
     formatted: list[tuple[str, str]] = []
     in_code = False
     for line in lines:
         stripped = line.strip()
+        if not in_code and is_markdown_table(line):
+            formatted.append((render_markdown_table(line, width), "table"))
+            continue
+        if not in_code and stripped.startswith(_TABLE_ROW_PREFIXES[1:]):
+            formatted.append((line, "table"))
+            continue
         if "\n" in line and stripped.startswith(("```", "~~~")):
             code_lines = line.splitlines()
             body = code_lines[1:-1] if len(code_lines) > 1 else []
@@ -356,9 +425,7 @@ def format_markdown_lines(lines: list[str]) -> list[tuple[str, str]]:
             items = [item.strip() for item in re.split(r"\s*•\s+", line) if item.strip()]
             formatted.append(("\n".join(f"  • {item}" for item in items), "bullet"))
             continue
-        clean = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), line)
-        clean = re.sub(r"`([^`]+)`", r"\1", clean)
-        formatted.append((clean, "normal"))
+        formatted.append((_strip_inline_markup(line), "normal"))
     return formatted
 
 
@@ -596,6 +663,7 @@ class PlainComposer:
             "code": (curses.COLOR_GREEN, -1),
             "quote": (curses.COLOR_MAGENTA, -1),
             "bullet": (curses.COLOR_WHITE, -1),
+            "table": (curses.COLOR_WHITE, -1),
             "gutter": (245 if color_count >= 256 else curses.COLOR_BLUE, -1),
             "marker": (curses.COLOR_GREEN, -1),
             "prompt": (curses.COLOR_WHITE, -1),
@@ -657,7 +725,8 @@ class PlainComposer:
         _safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
         _safe_addnstr(screen, 2, 1, "─" * inner_width, inner_width, self.style("muted"))
 
-        markdown = format_markdown_lines(self.lines)
+        content_width = max(1, width - 6)
+        markdown = format_markdown_lines(self.lines, content_width)
         rendered_blocks = [
             text if self.block_kinds[index] == "assistant" else self.lines[index]
             for index, (text, _kind) in enumerate(markdown)
@@ -672,9 +741,14 @@ class PlainComposer:
         rows = build_display_rows(
             rendered_blocks,
             self.comments,
-            width=max(1, width - 6),
+            width=content_width,
             spacing=True,
             compact_after=compact_after,
+            no_wrap={
+                index
+                for index, (_text, kind) in enumerate(markdown)
+                if kind == "table" and self.block_kinds[index] == "assistant"
+            },
         )
         selected_start, selected_end = self.current_selection()
         selected_row = next(

@@ -15,6 +15,7 @@ from output_comment_composer_plain import (
     group_logical_blocks,
     limit_transcript_blocks,
     needs_discard_confirmation,
+    render_markdown_table,
     selected_color_pair,
     selection_bounds,
     send_comments,
@@ -230,6 +231,57 @@ class PlainComposerTests(unittest.TestCase):
             [kind for kind, _index, _text in rows],
             ["line", "comment", "comment_continuation", "comment_continuation"],
         )
+
+    def test_markdown_table_rows_stay_in_one_block(self):
+        blocks = split_markdown_blocks(
+            "Intro.\n\n| Name | Value |\n|---|---|\n| alpha | 1 |\nAfter."
+        )
+
+        self.assertEqual(
+            blocks,
+            ["Intro.", "| Name | Value |\n|---|---|\n| alpha | 1 |", "After."],
+        )
+
+    def test_markdown_table_is_rendered_with_aligned_columns(self):
+        rendered = render_markdown_table(
+            "| Name | Value |\n|---|---|\n| **alpha** | 1 |\n| beta | 22 |"
+        )
+
+        self.assertEqual(
+            rendered.splitlines(),
+            [
+                "Name  │ Value",
+                "──────┼──────",
+                "alpha │ 1",
+                "beta  │ 22",
+            ],
+        )
+
+    def test_wide_markdown_table_truncates_widest_column(self):
+        rendered = render_markdown_table(
+            "| Key | Description |\n| a | a very long description |", width=16
+        )
+
+        self.assertEqual(
+            rendered.splitlines(),
+            ["Key │ Descripti…", "a   │ a very lo…"],
+        )
+        self.assertTrue(all(len(row) <= 16 for row in rendered.splitlines()))
+
+    def test_formats_table_block_with_table_style(self):
+        formatted = format_markdown_lines(["| a | b |\n| 1 | 2 |"])
+
+        self.assertEqual(formatted, [("a │ b\n1 │ 2", "table")])
+
+    def test_box_drawn_table_lines_are_not_joined(self):
+        blocks = group_logical_blocks(["┌───┐", "│ a │", "└───┘", "text"])
+
+        self.assertEqual(blocks, ["┌───┐\n│ a │\n└───┘", "text"])
+
+    def test_no_wrap_rows_are_truncated_not_wrapped(self):
+        rows = build_display_rows(["abcdefghij"], {}, width=4, no_wrap={0})
+
+        self.assertEqual(rows, [("line", 0, "abcd")])
 
     def test_comment_preview_flattens_and_truncates_block(self):
         self.assertEqual(comment_preview("short\n  block"), "short block")
