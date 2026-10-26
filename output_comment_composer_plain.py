@@ -533,16 +533,16 @@ def comment_preview(block: str, limit: int = 40) -> str:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
-def _draw_rounded_box(window: curses.window, attr: int = 0) -> None:
+def _draw_heavy_box(window: curses.window, attr: int = 0) -> None:
     height, width = window.getmaxyx()
     if height < 2 or width < 2:
         return
-    horizontal = "─" * (width - 2)
-    _safe_addnstr(window, 0, 0, f"╭{horizontal}╮", width, attr)
+    horizontal = "━" * (width - 2)
+    _safe_addnstr(window, 0, 0, f"┏{horizontal}┓", width, attr)
     for y in range(1, height - 1):
-        _safe_addnstr(window, y, 0, "│", 1, attr)
-        _safe_addnstr(window, y, width - 1, "│", 1, attr)
-    _safe_addnstr(window, height - 1, 0, f"╰{horizontal}╯", width, attr)
+        _safe_addnstr(window, y, 0, "┃", 1, attr)
+        _safe_addnstr(window, y, width - 1, "┃", 1, attr)
+    _safe_addnstr(window, height - 1, 0, f"┗{horizontal}┛", width, attr)
 
 
 def _safe_addnstr(
@@ -702,7 +702,7 @@ class PlainComposer:
         inner_bottom = viewer_height - 1 if reserved_bottom else height - 2
         inner_width = width - 2
         border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
-        _draw_rounded_box(screen, border_attr)
+        _draw_heavy_box(screen, border_attr)
         badge = " ✎ COMMENTS "
         _safe_addnstr(
             screen,
@@ -831,7 +831,7 @@ class PlainComposer:
     def edit_comment(self, screen: curses.window) -> None:
         height, width = screen.getmaxyx()
         box_width = width
-        box_height = 8
+        box_height = 5
         box_x = 0
         box_y = max(0, height - box_height)
         border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
@@ -850,10 +850,10 @@ class PlainComposer:
         try:
             while True:
                 editor.erase()
-                _draw_rounded_box(editor, border_attr)
+                _draw_heavy_box(editor, border_attr)
                 # Join the editor's top edge to the pane frame above it.
-                _safe_addnstr(editor, 0, 0, "├", 1, border_attr)
-                _safe_addnstr(editor, 0, box_width - 1, "┤", 1, border_attr)
+                _safe_addnstr(editor, 0, 0, "┣", 1, border_attr)
+                _safe_addnstr(editor, 0, box_width - 1, "┫", 1, border_attr)
                 _safe_addnstr(
                     editor,
                     0,
@@ -871,7 +871,7 @@ class PlainComposer:
                     box_width - label_x - 2,
                     border_attr,
                 )
-                inner_height = box_height - 3
+                inner_height = box_height - 2
                 inner_width = box_width - 4
                 visual_rows = editor_visual_rows(buffer, inner_width)
                 cursor_visual_row, cursor_visual_col = editor_cursor_position(
