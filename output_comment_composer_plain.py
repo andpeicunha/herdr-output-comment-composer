@@ -449,6 +449,26 @@ def send_comments(
     return True, ""
 
 
+def comment_preview(block: str, limit: int = 40) -> str:
+    """Return a one-line, truncated preview of the commented block."""
+    text = " ".join(block.split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _draw_rounded_box(window: curses.window, attr: int = 0) -> None:
+    height, width = window.getmaxyx()
+    if height < 2 or width < 2:
+        return
+    horizontal = "─" * (width - 2)
+    _safe_addnstr(window, 0, 0, f"╭{horizontal}╮", width, attr)
+    for y in range(1, height - 1):
+        _safe_addnstr(window, y, 0, "│", 1, attr)
+        _safe_addnstr(window, y, width - 1, "│", 1, attr)
+    _safe_addnstr(window, height - 1, 0, f"╰{horizontal}╯", width, attr)
+
+
 def _safe_addnstr(
     screen: curses.window, y: int, x: int, text: str, width: int, attr: int = 0
 ) -> None:
@@ -559,6 +579,7 @@ class PlainComposer:
             "header": (curses.COLOR_CYAN, -1),
             "selected": selected_color_pair(color_count),
             "comment": (curses.COLOR_YELLOW, -1),
+            "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
             "muted": (curses.COLOR_BLUE, -1),
             "footer": (curses.COLOR_WHITE, curses.COLOR_BLUE),
             "success": (curses.COLOR_GREEN, -1),
@@ -714,10 +735,13 @@ class PlainComposer:
 
     def edit_comment(self, screen: curses.window) -> None:
         height, width = screen.getmaxyx()
-        box_width = max(30, min(width - 4, 110))
+        box_width = width
         box_height = 8
-        box_x = max(0, (width - box_width) // 2)
+        box_x = 0
         box_y = max(0, height - box_height)
+        border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
+        badge = " ✎ COMMENT "
+        preview = comment_preview(self.lines[self.cursor])
         self.draw(screen, reserved_bottom=box_height)
         editor = curses.newwin(box_height, box_width, box_y, box_x)
         editor.keypad(True)
@@ -731,9 +755,24 @@ class PlainComposer:
         try:
             while True:
                 editor.erase()
-                editor.box()
-                label = f" Comment on line {self.cursor + 1} "
-                _safe_addnstr(editor, 0, 2, label, box_width - 4, curses.A_BOLD)
+                _draw_rounded_box(editor, border_attr)
+                _safe_addnstr(
+                    editor,
+                    0,
+                    2,
+                    badge,
+                    box_width - 4,
+                    self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
+                )
+                label_x = 2 + len(badge)
+                _safe_addnstr(
+                    editor,
+                    0,
+                    label_x,
+                    f" {preview} ",
+                    box_width - label_x - 2,
+                    border_attr,
+                )
                 inner_height = box_height - 3
                 inner_width = box_width - 4
                 visual_rows = editor_visual_rows(buffer, inner_width)

@@ -6,6 +6,7 @@ from output_comment_composer_plain import (
     build_display_rows,
     build_prompt,
     codex_transcript_blocks,
+    comment_preview,
     content_rows_available,
     editor_cursor_position,
     editor_visual_rows,
@@ -221,6 +222,10 @@ class PlainComposerTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(error, "")
         self.assertEqual(run.call_args.args[0][1:4], ["agent", "prompt", "pane-1"])
+
+    def test_comment_preview_flattens_and_truncates_block(self):
+        self.assertEqual(comment_preview("short\n  block"), "short block")
+        self.assertEqual(comment_preview("a" * 50, limit=10), "aaaaaaaaa…")
 
 
 if __name__ == "__main__":
