@@ -4,17 +4,51 @@ A keyboard-first [Herdr](https://herdr.io) plugin for reviewing agent output,
 adding inline comments, and sending structured feedback without leaving the
 terminal.
 
+```
+┏━ ✎ COMMENTS  Output Comment Composer ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ source w1:p1  ·  2 comment(s)  ·  block 7/11 · end                               ┃
+┃──────────────────────────────────────────────────────────────────────────────────┃
+┃                                                                                 │┃
+┃  Check │ Status │ Notes                                                         │┃
+┃  ──────┼────────┼───────────────────                                            │┃
+┃  Tests │ pass   │ 52 tests in 0.004s                                            ┃┃
+┃  Lint  │ warn   │ one unused import                                             ┃┃
+┃                                                                                 ┃┃
+┃  Apply this config:                                                             ┃┃
+┃                                                                                 ┃┃
+┃  ─ code · toml ────────                                                         ┃┃
+┃    [release]                                                                    ┃┃
+┃    version = "0.4.0"                                                            ┃┃
+┃  ╰─ comment: Use 0.4.1, 0.4.0 is already taken.                                 ┃┃
+┃    notes = true                                                                 ┃┃
+┃                                                                                 ┃┃
+┃    • Ship after the lint fix.                                                   ┃┃
+┃  ╰─ comment: Do this before tagging.                                            ┃┃
+┃    • Tag the release on main.                                                   ┃┃
+┃                                                                                 ┃┃
+┃  Want me to open the pull request?                                              ┃┃
+┃──────────────────────────────────────────────────────────────────────────────────┃
+┃ Comment saved on block 9                                                         ┃
+┃ ↑/↓ move · ⇧↑/↓ page · Space select · y copy · c comment · s send · q close      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
 ## Features
 
-- Reads up to 500 recent lines from Codex or Claude JSONL transcripts
-  (set `OCC_MAX_LINES` to change the limit).
-- Falls back to `herdr pane read` for other agents.
-- Organizes prompts, assistant output, tools, paragraphs, lists, quotes,
-  headings, tables, and code into selectable blocks.
-- Renders Markdown tables with aligned columns, truncating wide cells.
-- Wraps long content and comments without hiding the cursor.
-- Supports multiline comments, draft-discard confirmation, multi-block copy,
-  and structured feedback submission.
+- Reads up to 500 recent lines from Codex or Claude Code JSONL transcripts;
+  falls back to `herdr pane read` for other agents.
+- Splits output into selectable blocks: prompts, paragraphs, list items,
+  headings, quotes, tables, tool calls, and every line of a code fence, so you
+  can comment on a single line of code.
+- Renders Markdown the way the agent UIs do: `**bold**` as bold, tables with
+  aligned columns (wide cells are truncated), and code fences with a
+  `─ code · lang ─` marker.
+- Opens a comment box for the current block; multiline comments, `Tab` to jump
+  to the next block while typing, and a confirmation before discarding a draft.
+- Shows a scrollbar and a `top` / `NN%` / `end` position, with page navigation
+  on `Shift+↑` / `Shift+↓`.
+- Copies one or more blocks through OSC 52, keeping code lines intact.
+- Sends all comments to the source agent as one structured prompt.
 - Uses Python's built-in `curses`; no Python package installation is needed.
 
 ## Requirements
@@ -43,26 +77,33 @@ description = "output-comment-composer: toggle"
 
 ### Keys
 
+While navigating:
+
 | Key | Action |
 | --- | --- |
-| `↑` / `k` | Previous semantic block |
-| `↓` / `j` | Next semantic block |
+| `↑` / `k` | Previous block |
+| `↓` / `j` | Next block |
 | `Shift+↑` / `Shift+↓` | Move a full page up / down |
 | `u` / `Page Up` | Move half a page up |
 | `d` / `Page Down` | Move half a page down |
 | `g` / `G` | First / last block |
 | `c` | Open the comment box for the current block |
-| `Enter` | Add a line inside the comment editor |
+| `Space` | Start or finish a multi-block selection |
+| `y` | Copy the selected blocks through OSC 52 |
+| `s` | Send all comments to the source agent |
+| `q` / `Esc` | Close the composer |
+
+While the comment box is open:
+
+| Key | Action |
+| --- | --- |
+| `Enter` | New line |
 | `Tab` / `Shift+Tab` | Save and keep typing on the next / previous block |
 | `Ctrl+S` | Save the comment and close the box |
-| `Esc` | Cancel editing; confirm before discarding changes |
-| `Space` | Start or finish a multi-block selection |
-| `y` | Copy selected blocks through OSC 52 |
-| `s` | Send all comments to the source agent |
-| `q` | Close the composer |
+| `Esc` | Cancel; asks before discarding changes |
 
 Use your terminal's paste shortcut, usually `Ctrl+Shift+V`, inside the comment
-editor.
+box.
 
 ### Environment variables
 
@@ -74,10 +115,37 @@ composer pane.
 | `OCC_MAX_LINES` | `500` | Transcript lines to load |
 | `OCC_SIGNATURE` | unset | Signature line appended to the sent prompt, e.g. `@your-handle` |
 
+## What gets sent
+
+`s` sends one prompt to the source agent. Each comment names its block and
+quotes the commented text. For the preview above:
+
+```
+Please address these comments on your previous output:
+
+Comment 1 on block 7:
+
+> version = "0.4.0"
+
+Comment:
+Use 0.4.1, 0.4.0 is already taken.
+
+Comment 2 on block 9:
+
+> - Ship after the **lint** fix.
+
+Comment:
+Do this before tagging.
+
+— @your-handle
+```
+
+The signature line only appears when `OCC_SIGNATURE` is set.
+
 ## How it works
 
 1. The plugin reads the current agent session metadata from Herdr.
-2. Codex and Claude sessions are loaded from their local JSONL transcripts.
+2. Codex and Claude Code sessions are loaded from their local JSONL transcripts.
 3. Recent content is split into semantic Markdown blocks and shown in a zoomed
    `curses` pane.
 4. Comments stay in memory until `s` sends a structured prompt through Herdr.
@@ -89,9 +157,9 @@ network access after it receives the feedback prompt.
 
 | Agent | Source |
 | --- | --- |
-| Codex | `~/.codex/sessions/**/*.jsonl` |
-| Claude Code | `~/.claude/projects/**/*.jsonl` |
-| Other agents | `herdr pane read` fallback |
+| Codex | `$CODEX_HOME/sessions/**/*.jsonl` (default `~/.codex`) |
+| Claude Code | `$CLAUDE_CONFIG_DIR/projects/*/*.jsonl` (default `~/.claude`) |
+| Other agents | Last 200 lines from `herdr pane read` |
 
 ## Development
 
@@ -105,7 +173,7 @@ Project layout:
 | --- | --- |
 | `output_comment_composer.py` | Entry point started by `bin/output-comment-composer` |
 | `occ/transcript.py` | Codex and Claude JSONL transcript loading |
-| `occ/markdown.py` | Block grouping, inline Markdown, and tables |
+| `occ/markdown.py` | Block grouping, inline Markdown, tables, and code fences |
 | `occ/layout.py` | Display rows, paging, and scrollbar math |
 | `occ/editor.py` | `TextBuffer`, the comment editor's text model |
 | `occ/herdr_io.py` | Herdr pane reads, clipboard copy, and prompt sending |
