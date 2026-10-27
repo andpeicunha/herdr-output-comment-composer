@@ -24,6 +24,10 @@ _COMMENT_BOX_HEIGHT = 5
 # Markdown pipe rows, or tables already drawn with box characters by the agent UI.
 _TABLE_ROW_PREFIXES = ("|", "│", "┌", "├", "└", "┏", "┣", "┗", "╭", "╰")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+# Invisible markers around bold spans in rendered text; drawn with A_BOLD.
+BOLD_ON = "\x01"
+BOLD_OFF = "\x02"
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|(?<!\w)__(.+?)__(?!\w)")
 
 
 def load_meta() -> dict[str, str]:
@@ -390,9 +394,41 @@ def copy_blocks_to_clipboard(blocks: list[str], start: int, end: int) -> None:
     os.write(1, f"\x1b]52;c;{encoded}\a".encode("ascii"))
 
 
+def mark_inline_markup(text: str) -> str:
+    """Replace **bold**/__bold__ with BOLD_ON/BOLD_OFF markers and unwrap `code`.
+
+    Code spans are kept literal, so `__init__` is not mistaken for bold.
+    """
+    parts = re.split(r"`([^`]+)`", text)
+    for index in range(0, len(parts), 2):
+        parts[index] = _BOLD_RE.sub(
+            lambda m: f"{BOLD_ON}{m.group(1) or m.group(2)}{BOLD_OFF}", parts[index]
+        )
+    return "".join(parts)
+
+
 def _strip_inline_markup(text: str) -> str:
-    clean = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
-    return re.sub(r"`([^`]+)`", r"\1", clean)
+    return mark_inline_markup(text).replace(BOLD_ON, "").replace(BOLD_OFF, "")
+
+
+def bold_segments(text: str, bold: bool = False) -> tuple[list[tuple[str, bool]], bool]:
+    """Split marked text into (segment, is_bold) pairs; return the trailing bold state.
+
+    The state carries across wrapped rows of the same block.
+    """
+    segments: list[tuple[str, bool]] = []
+    current = ""
+    for char in text:
+        if char in (BOLD_ON, BOLD_OFF):
+            if current:
+                segments.append((current, bold))
+                current = ""
+            bold = char == BOLD_ON
+        else:
+            current += char
+    if current:
+        segments.append((current, bold))
+    return segments, bold
 
 
 def is_markdown_table(block: str) -> bool:
@@ -462,25 +498,25 @@ def format_markdown_lines(lines: list[str], width: int = 0) -> list[tuple[str, s
             continue
         heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if heading:
-            formatted.append((heading.group(2), "heading"))
+            formatted.append((mark_inline_markup(heading.group(2)), "heading"))
             continue
         quote = re.match(r"^>\s?(.*)$", stripped)
         if quote:
-            formatted.append(("│ " + quote.group(1), "quote"))
+            formatted.append(("│ " + mark_inline_markup(quote.group(1)), "quote"))
             continue
         bullet = re.match(r"^\s*[-*+]\s+(.*)$", line)
         if bullet:
-            formatted.append(("  • " + bullet.group(1), "bullet"))
+            formatted.append(("  • " + mark_inline_markup(bullet.group(1)), "bullet"))
             continue
         numbered = re.match(r"^\s*(\d+[.)])\s+(.*)$", line)
         if numbered:
-            formatted.append((f"  {numbered.group(1)} {numbered.group(2)}", "bullet"))
+            formatted.append((f"  {numbered.group(1)} {mark_inline_markup(numbered.group(2))}", "bullet"))
             continue
         if re.search(r"(?:^|\s)•\s+", line):
             items = [item.strip() for item in re.split(r"\s*•\s+", line) if item.strip()]
-            formatted.append(("\n".join(f"  • {item}" for item in items), "bullet"))
+            formatted.append(("\n".join(f"  • {mark_inline_markup(item)}" for item in items), "bullet"))
             continue
-        formatted.append((_strip_inline_markup(line), "normal"))
+        formatted.append((mark_inline_markup(line), "normal"))
     return formatted
 
 
@@ -664,7 +700,7 @@ def comment_preview(block: str, limit: int = 40) -> str:
     if is_markdown_table(block):
         header = block.splitlines()[0].strip().strip("|").split("|")
         block = " · ".join(_strip_inline_markup(cell.strip()) for cell in header)
-    text = " ".join(block.split())
+    text = " ".join(_strip_inline_markup(block).split())
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
@@ -877,10 +913,14 @@ class PlainComposer:
 
         content_width = max(1, width - 6)
         markdown = format_markdown_lines(self.lines, content_width)
-        rendered_blocks = [
-            text if self.block_kinds[index] == "assistant" else self.lines[index]
-            for index, (text, _kind) in enumerate(markdown)
-        ]
+        rendered_blocks = []
+        for index, (text, _kind) in enumerate(markdown):
+            block_kind = self.block_kinds[index]
+            if block_kind == "user":
+                text = mark_inline_markup(self.lines[index])
+            elif block_kind != "assistant":
+                text = self.lines[index]
+            rendered_blocks.append(text)
         compact_after = {
             index
             for index in range(len(markdown) - 1)
@@ -929,6 +969,16 @@ class PlainComposer:
                 else:
                     _safe_addnstr(screen, 3 + offset, width - 2, "│", 1, self.style("muted"))
 
+        # Bold state at the start of each row, so a bold span wrapped over rows stays bold.
+        bold_at_row: list[bool] = []
+        bold = False
+        for kind, _line_index, text in rows:
+            if kind == "line":
+                bold = False
+            bold_at_row.append(bold)
+            if kind in ("line", "continuation"):
+                _segments, bold = bold_segments(text, bold)
+
         for y, (kind, line_index, text) in enumerate(rows[top : top + available], 3):
             if kind == "spacer":
                 continue
@@ -967,14 +1017,15 @@ class PlainComposer:
                     content_attr = self.style(markdown_kind, fallback)
                 gutter_attr = self.style("marker" if block_kind != "tool" else "tool")
             _safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
-            _safe_addnstr(
-                screen,
-                y,
-                1 + len(prefix),
-                text,
-                inner_width - len(prefix),
-                content_attr,
-            )
+            x = 1 + len(prefix)
+            segments, _bold = bold_segments(text, bold_at_row[top + y - 3])
+            for segment, is_bold in segments:
+                room = inner_width - (x - 1)
+                if room <= 0:
+                    break
+                attr = content_attr | curses.A_BOLD if is_bold else content_attr
+                _safe_addnstr(screen, y, x, segment, room, attr)
+                x += len(segment)
 
         _safe_addnstr(
             screen,

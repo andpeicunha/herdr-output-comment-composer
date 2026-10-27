@@ -4,6 +4,9 @@ import unittest
 from unittest.mock import patch
 
 from output_comment_composer_plain import (
+    BOLD_OFF,
+    BOLD_ON,
+    bold_segments,
     build_display_rows,
     build_prompt,
     codex_transcript_blocks,
@@ -15,6 +18,7 @@ from output_comment_composer_plain import (
     format_markdown_lines,
     group_logical_blocks,
     limit_transcript_blocks,
+    mark_inline_markup,
     needs_discard_confirmation,
     page_target,
     render_markdown_table,
@@ -338,6 +342,38 @@ class PlainComposerTests(unittest.TestCase):
         for invalid in ("abc", "0", "-5"):
             with patch.dict("os.environ", {"OCC_MAX_LINES": invalid}):
                 self.assertEqual(transcript_max_lines(), 500)
+
+    def test_bold_is_marked_in_every_text_style(self):
+        lines = ["- **Pane:** text", "1. **Step** one", "## **Title**", "> **q** x", "plain **b**"]
+        formatted = [text for text, _kind in format_markdown_lines(lines)]
+
+        self.assertEqual(
+            formatted,
+            [
+                f"  • {BOLD_ON}Pane:{BOLD_OFF} text",
+                f"  1. {BOLD_ON}Step{BOLD_OFF} one",
+                f"{BOLD_ON}Title{BOLD_OFF}",
+                f"│ {BOLD_ON}q{BOLD_OFF} x",
+                f"plain {BOLD_ON}b{BOLD_OFF}",
+            ],
+        )
+        self.assertFalse(any("**" in text for text in formatted))
+
+    def test_code_spans_keep_underscores_literal(self):
+        self.assertEqual(mark_inline_markup("call `__init__` and __bold__"), f"call __init__ and {BOLD_ON}bold{BOLD_OFF}")
+        self.assertEqual(mark_inline_markup("snake_case_name"), "snake_case_name")
+
+    def test_bold_segments_carry_state_across_rows(self):
+        first, bold = bold_segments(f"a {BOLD_ON}wrapped")
+        second, bold_after = bold_segments(f"span{BOLD_OFF} end", bold)
+
+        self.assertEqual(first, [("a ", False), ("wrapped", True)])
+        self.assertTrue(bold)
+        self.assertEqual(second, [("span", True), (" end", False)])
+        self.assertFalse(bold_after)
+
+    def test_comment_preview_strips_bold_markers(self):
+        self.assertEqual(comment_preview("- **Pane:** text"), "- Pane: text")
 
     def test_text_buffer_starts_at_end_of_existing_text(self):
         buffer = TextBuffer("one\ntwo")
