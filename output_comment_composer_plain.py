@@ -535,6 +535,80 @@ def editor_cursor_position(
     return index, column - start
 
 
+class TextBuffer:
+    """Multi-line text with a cursor; the comment editor's pure editing model."""
+
+    def __init__(self, text: str = "") -> None:
+        self.lines = text.splitlines() or [""]
+        self.row = len(self.lines) - 1
+        self.col = len(self.lines[self.row])
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self.lines)
+
+    def insert(self, text: str) -> None:
+        line = self.lines[self.row]
+        self.lines[self.row] = line[: self.col] + text + line[self.col :]
+        self.col += len(text)
+
+    def newline(self) -> None:
+        line = self.lines[self.row]
+        self.lines[self.row] = line[: self.col]
+        self.lines.insert(self.row + 1, line[self.col :])
+        self.row += 1
+        self.col = 0
+
+    def backspace(self) -> None:
+        if self.col > 0:
+            line = self.lines[self.row]
+            self.lines[self.row] = line[: self.col - 1] + line[self.col :]
+            self.col -= 1
+        elif self.row > 0:
+            previous_length = len(self.lines[self.row - 1])
+            self.lines[self.row - 1] += self.lines.pop(self.row)
+            self.row -= 1
+            self.col = previous_length
+
+    def move_left(self) -> None:
+        if self.col > 0:
+            self.col -= 1
+        elif self.row > 0:
+            self.row -= 1
+            self.col = len(self.lines[self.row])
+
+    def move_right(self) -> None:
+        if self.col < len(self.lines[self.row]):
+            self.col += 1
+        elif self.row + 1 < len(self.lines):
+            self.row += 1
+            self.col = 0
+
+    def move_up(self) -> None:
+        if self.row > 0:
+            self.row -= 1
+            self.col = min(self.col, len(self.lines[self.row]))
+
+    def move_down(self) -> None:
+        if self.row + 1 < len(self.lines):
+            self.row += 1
+            self.col = min(self.col, len(self.lines[self.row]))
+
+
+_EDITOR_KEYS = {
+    "\n": TextBuffer.newline,
+    "\r": TextBuffer.newline,
+    curses.KEY_ENTER: TextBuffer.newline,
+    "\b": TextBuffer.backspace,
+    "\x7f": TextBuffer.backspace,
+    curses.KEY_BACKSPACE: TextBuffer.backspace,
+    curses.KEY_LEFT: TextBuffer.move_left,
+    curses.KEY_RIGHT: TextBuffer.move_right,
+    curses.KEY_UP: TextBuffer.move_up,
+    curses.KEY_DOWN: TextBuffer.move_down,
+}
+
+
 def build_prompt(lines: list[str], comments: dict[int, str], signature: str = "") -> str:
     parts = ["Please address these comments on your previous output:"]
     for number, block_index in enumerate(sorted(comments), 1):
@@ -634,9 +708,7 @@ class PlainComposer:
         self.sent = False
         self.colors: dict[str, int] = {}
         # Typing state for the open comment box; None while it is closed.
-        self.edit_buffer: list[str] | None = None
-        self.edit_row = 0
-        self.edit_col = 0
+        self.editor: TextBuffer | None = None
         self.edit_top = 0
         # Layout from the last draw, used to page by screen rows.
         self.display_rows: list[tuple[str, int, str]] = []
@@ -772,7 +844,7 @@ class PlainComposer:
     def draw(self, screen: curses.window) -> None:
         screen.erase()
         height, width = screen.getmaxyx()
-        box_height = _COMMENT_BOX_HEIGHT if self.edit_buffer is not None else 0
+        box_height = _COMMENT_BOX_HEIGHT if self.editor is not None else 0
         viewer_height = height - box_height
         if viewer_height < 8 or width < 30:
             _safe_addnstr(screen, 0, 0, "Pane too small", width - 1, curses.A_BOLD)
@@ -953,10 +1025,9 @@ class PlainComposer:
             border_attr,
         )
 
-        visual_rows = editor_visual_rows(self.edit_buffer or [""], inner_width)
-        cursor_row, cursor_col = editor_cursor_position(
-            visual_rows, self.edit_row, self.edit_col
-        )
+        editor = self.editor or TextBuffer()
+        visual_rows = editor_visual_rows(editor.lines, inner_width)
+        cursor_row, cursor_col = editor_cursor_position(visual_rows, editor.row, editor.col)
         if cursor_row < self.edit_top:
             self.edit_top = cursor_row
         elif cursor_row >= self.edit_top + inner_height:
@@ -972,17 +1043,15 @@ class PlainComposer:
         except curses.error:
             pass
 
-    def load_edit_buffer(self) -> str:
+    def open_editor(self) -> str:
         """Start typing on the current block; return its saved comment."""
         original = self.comments.get(self.cursor, "")
-        self.edit_buffer = original.splitlines() or [""]
-        self.edit_row = len(self.edit_buffer) - 1
-        self.edit_col = len(self.edit_buffer[self.edit_row])
+        self.editor = TextBuffer(original)
         self.edit_top = 0
         return original
 
-    def save_edit_buffer(self) -> None:
-        text = "\n".join(self.edit_buffer or []).strip()
+    def save_editor(self) -> None:
+        text = self.editor.text.strip() if self.editor else ""
         if text:
             self.comments[self.cursor] = text
             self.status = f"Comment saved on block {self.cursor + 1}"
@@ -990,72 +1059,38 @@ class PlainComposer:
             self.status = f"Comment removed from block {self.cursor + 1}"
 
     def edit_comment(self, screen: curses.window) -> None:
-        original = self.load_edit_buffer()
+        original = self.open_editor()
         curses.curs_set(1)
         try:
             while True:
                 self.draw(screen)
                 key = screen.get_wch()
-                buffer = self.edit_buffer
-                row, col = self.edit_row, self.edit_col
+                editor = self.editor
                 if key == "\x13":
-                    self.save_edit_buffer()
+                    self.save_editor()
                     return
                 if key in ("\t", curses.KEY_BTAB):
                     # Save, then keep typing on the next/previous block.
-                    self.save_edit_buffer()
+                    self.save_editor()
                     step = 1 if key == "\t" else -1
                     self.cursor = min(max(0, self.cursor + step), len(self.lines) - 1)
-                    original = self.load_edit_buffer()
+                    original = self.open_editor()
                     continue
                 if key == "\x1b":
-                    current = "\n".join(buffer)
-                    if needs_discard_confirmation(original, current):
+                    if needs_discard_confirmation(original, editor.text):
                         curses.curs_set(0)
                         if not self.confirm_discard(screen):
                             curses.curs_set(1)
                             continue
                     self.status = "Comment edit cancelled"
                     return
-                if key in ("\n", "\r", curses.KEY_ENTER):
-                    remainder = buffer[row][col:]
-                    buffer[row] = buffer[row][:col]
-                    buffer.insert(row + 1, remainder)
-                    row += 1
-                    col = 0
-                elif key in (curses.KEY_BACKSPACE, "\b", "\x7f"):
-                    if col > 0:
-                        buffer[row] = buffer[row][: col - 1] + buffer[row][col:]
-                        col -= 1
-                    elif row > 0:
-                        previous_length = len(buffer[row - 1])
-                        buffer[row - 1] += buffer.pop(row)
-                        row -= 1
-                        col = previous_length
-                elif key == curses.KEY_LEFT:
-                    if col > 0:
-                        col -= 1
-                    elif row > 0:
-                        row -= 1
-                        col = len(buffer[row])
-                elif key == curses.KEY_RIGHT:
-                    if col < len(buffer[row]):
-                        col += 1
-                    elif row + 1 < len(buffer):
-                        row += 1
-                        col = 0
-                elif key == curses.KEY_UP and row > 0:
-                    row -= 1
-                    col = min(col, len(buffer[row]))
-                elif key == curses.KEY_DOWN and row + 1 < len(buffer):
-                    row += 1
-                    col = min(col, len(buffer[row]))
+                action = _EDITOR_KEYS.get(key)
+                if action is not None:
+                    action(editor)
                 elif isinstance(key, str) and key.isprintable():
-                    buffer[row] = buffer[row][:col] + key + buffer[row][col:]
-                    col += len(key)
-                self.edit_row, self.edit_col = row, col
+                    editor.insert(key)
         finally:
-            self.edit_buffer = None
+            self.editor = None
             curses.curs_set(0)
 
     def confirm_discard(self, screen: curses.window) -> bool:

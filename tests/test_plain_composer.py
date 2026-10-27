@@ -24,6 +24,7 @@ from output_comment_composer_plain import (
     selection_bounds,
     send_comments,
     split_markdown_blocks,
+    TextBuffer,
     transcript_max_lines,
 )
 
@@ -337,6 +338,56 @@ class PlainComposerTests(unittest.TestCase):
         for invalid in ("abc", "0", "-5"):
             with patch.dict("os.environ", {"OCC_MAX_LINES": invalid}):
                 self.assertEqual(transcript_max_lines(), 500)
+
+    def test_text_buffer_starts_at_end_of_existing_text(self):
+        buffer = TextBuffer("one\ntwo")
+
+        self.assertEqual((buffer.row, buffer.col), (1, 3))
+        self.assertEqual(TextBuffer().lines, [""])
+
+    def test_text_buffer_insert_and_newline_split_line(self):
+        buffer = TextBuffer("helloworld")
+        buffer.col = 5
+        buffer.newline()
+        buffer.insert("big ")
+
+        self.assertEqual(buffer.text, "hello\nbig world")
+        self.assertEqual((buffer.row, buffer.col), (1, 4))
+
+    def test_text_buffer_backspace_joins_lines_at_line_start(self):
+        buffer = TextBuffer("ab\ncd")
+        buffer.col = 0
+        buffer.backspace()
+
+        self.assertEqual(buffer.text, "abcd")
+        self.assertEqual((buffer.row, buffer.col), (0, 2))
+        buffer.backspace()
+        self.assertEqual(buffer.text, "acd")
+
+    def test_text_buffer_backspace_at_start_does_nothing(self):
+        buffer = TextBuffer("x")
+        buffer.col = 0
+        buffer.backspace()
+
+        self.assertEqual(buffer.text, "x")
+
+    def test_text_buffer_horizontal_moves_wrap_across_lines(self):
+        buffer = TextBuffer("ab\ncd")
+        buffer.col = 0
+        buffer.move_left()
+        self.assertEqual((buffer.row, buffer.col), (0, 2))
+        buffer.move_right()
+        self.assertEqual((buffer.row, buffer.col), (1, 0))
+
+    def test_text_buffer_vertical_moves_clamp_column(self):
+        buffer = TextBuffer("long line\nab")
+        buffer.move_up()
+        self.assertEqual((buffer.row, buffer.col), (0, 2))
+        buffer.col = 9
+        buffer.move_down()
+        self.assertEqual((buffer.row, buffer.col), (1, 2))
+        buffer.move_down()
+        self.assertEqual((buffer.row, buffer.col), (1, 2))
 
     def test_scrollbar_hidden_when_content_fits(self):
         self.assertIsNone(scrollbar_thumb(10, 10, 0))
