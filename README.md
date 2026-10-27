@@ -4,6 +4,8 @@ A keyboard-first [Herdr](https://herdr.io) plugin for reviewing agent output,
 adding inline comments, and sending structured feedback without leaving the
 terminal.
 
+Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app/herdr-comment).
+
 ![Output Comment Composer reviewing an agent answer in Herdr](docs/preview.png)
 
 ## Features
