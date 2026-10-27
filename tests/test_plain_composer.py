@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from unittest.mock import patch
@@ -15,11 +16,13 @@ from output_comment_composer_plain import (
     group_logical_blocks,
     limit_transcript_blocks,
     needs_discard_confirmation,
+    page_target,
     render_markdown_table,
     selected_color_pair,
     selection_bounds,
     send_comments,
     split_markdown_blocks,
+    transcript_max_lines,
 )
 
 
@@ -286,6 +289,39 @@ class PlainComposerTests(unittest.TestCase):
     def test_comment_preview_flattens_and_truncates_block(self):
         self.assertEqual(comment_preview("short\n  block"), "short block")
         self.assertEqual(comment_preview("a" * 50, limit=10), "aaaaaaaaa…")
+
+    def test_page_target_moves_by_display_rows(self):
+        # Blocks 0-4, block 1 spans three rows.
+        rows = [
+            ("line", 0, "a"),
+            ("line", 1, "b1"),
+            ("continuation", 1, "b2"),
+            ("continuation", 1, "b3"),
+            ("line", 2, "c"),
+            ("line", 3, "d"),
+            ("line", 4, "e"),
+        ]
+
+        self.assertEqual(page_target(rows, 0, 4), 2)
+        self.assertEqual(page_target(rows, 4, -3), 1)
+        self.assertEqual(page_target(rows, 3, 50), 4)
+        self.assertEqual(page_target(rows, 2, -50), 0)
+
+    def test_page_target_always_advances_past_tall_block(self):
+        rows = [("line", 0, "a")] + [("continuation", 0, "x")] * 10 + [("line", 1, "b")]
+
+        self.assertEqual(page_target(rows, 0, 3), 1)
+        self.assertEqual(page_target(rows, 1, -1), 0)
+
+    def test_transcript_max_lines_defaults_and_env_override(self):
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("OCC_MAX_LINES", None)
+            self.assertEqual(transcript_max_lines(), 500)
+        with patch.dict("os.environ", {"OCC_MAX_LINES": "120"}):
+            self.assertEqual(transcript_max_lines(), 120)
+        for invalid in ("abc", "0", "-5"):
+            with patch.dict("os.environ", {"OCC_MAX_LINES": invalid}):
+                self.assertEqual(transcript_max_lines(), 500)
 
     def test_comment_preview_uses_table_header_cells(self):
         self.assertEqual(

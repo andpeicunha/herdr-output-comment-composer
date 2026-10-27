@@ -16,7 +16,7 @@ import traceback
 
 _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]\s)")
-_TRANSCRIPT_MAX_LINES = 800
+_TRANSCRIPT_MAX_LINES = 500
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMMENT_PREFIX = "  ╰─ comment: "
 # Open comment box: top divider, three text rows, and the frame's bottom edge.
@@ -162,6 +162,37 @@ def _find_claude_transcript(session_id: str) -> str | None:
     return None
 
 
+def transcript_max_lines() -> int:
+    """Return the transcript line budget, overridable with ``OCC_MAX_LINES``."""
+    try:
+        value = int(os.environ.get("OCC_MAX_LINES", ""))
+    except ValueError:
+        return _TRANSCRIPT_MAX_LINES
+    return value if value > 0 else _TRANSCRIPT_MAX_LINES
+
+
+def page_target(rows: list[tuple[str, int, str]], cursor: int, delta_rows: int) -> int:
+    """Return the block about ``delta_rows`` display rows away from ``cursor``.
+
+    Always moves at least one block, so a block taller than the page is not a dead end.
+    """
+    if not rows:
+        return cursor
+    start = next(
+        (index for index, (kind, line_index, _) in enumerate(rows)
+         if kind == "line" and line_index == cursor),
+        0,
+    )
+    target_row = min(max(0, start + delta_rows), len(rows) - 1)
+    target = rows[target_row][1]
+    last_block = rows[-1][1]
+    if delta_rows > 0 and target <= cursor:
+        target = min(cursor + 1, last_block)
+    elif delta_rows < 0 and target >= cursor:
+        target = max(cursor - 1, 0)
+    return target
+
+
 def fetch_transcript(meta: dict[str, str]) -> list[tuple[str, str]]:
     session_id = meta.get("SESSION_ID", "")
     agent = meta.get("AGENT", "")
@@ -173,7 +204,7 @@ def fetch_transcript(meta: dict[str, str]) -> list[tuple[str, str]]:
         blocks = claude_transcript_blocks(_read_jsonl(path)) if path else []
     else:
         blocks = []
-    return limit_transcript_blocks(blocks)
+    return limit_transcript_blocks(blocks, transcript_max_lines())
 
 
 def fetch_snapshot(source_pane: str) -> list[str]:
@@ -580,6 +611,9 @@ class PlainComposer:
         self.edit_row = 0
         self.edit_col = 0
         self.edit_top = 0
+        # Layout from the last draw, used to page by screen rows.
+        self.display_rows: list[tuple[str, int, str]] = []
+        self.visible_rows = 1
 
     def run(self, screen: curses.window) -> None:
         curses.curs_set(0)
@@ -613,13 +647,22 @@ class PlainComposer:
                 self.cursor = max(0, self.cursor - 1)
             elif key in (curses.KEY_DOWN, ord("j")):
                 self.cursor = min(len(self.lines) - 1, self.cursor + 1)
-            elif key in (curses.KEY_PPAGE, ord("u")):
-                self.cursor = max(0, self.cursor - max(1, screen.getmaxyx()[0] // 2))
-            elif key in (curses.KEY_NPAGE, ord("d")):
-                self.cursor = min(
-                    len(self.lines) - 1,
-                    self.cursor + max(1, screen.getmaxyx()[0] // 2),
-                )
+            elif key in (
+                curses.KEY_SR,
+                curses.KEY_SF,
+                curses.KEY_PPAGE,
+                curses.KEY_NPAGE,
+                ord("u"),
+                ord("d"),
+            ):
+                # Shift+arrows page a full screen; u/d and PgUp/PgDn half a screen.
+                if key in (curses.KEY_SR, curses.KEY_SF):
+                    page = max(1, self.visible_rows - 2)
+                else:
+                    page = max(1, self.visible_rows // 2)
+                if key in (curses.KEY_SR, curses.KEY_PPAGE, ord("u")):
+                    page = -page
+                self.cursor = page_target(self.display_rows, self.cursor, page)
             elif key == ord("g"):
                 self.cursor = 0
             elif key == ord("G"):
@@ -768,6 +811,8 @@ class PlainComposer:
             if kind == "line" and line_index == self.cursor
         )
         available = content_rows_available(height, box_height)
+        self.display_rows = rows
+        self.visible_rows = available
         top = max(0, selected_row - available // 2)
         top = min(top, max(0, len(rows) - available))
 
@@ -828,7 +873,7 @@ class PlainComposer:
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
         _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
-        footer = " ↑/↓ move · Space select · y copy · c comment · s send · q close "
+        footer = " ↑/↓ move · ⇧↑/↓ page · Space select · y copy · c comment · s send · q close "
         _safe_addnstr(
             screen,
             inner_bottom,

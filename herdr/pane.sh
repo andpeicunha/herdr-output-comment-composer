@@ -122,6 +122,10 @@ if [ -n "$cwd" ]; then
   open_args+=(--cwd "$cwd")
 fi
 
+if [ -n "${OCC_MAX_LINES:-}" ]; then
+  open_args+=(--env "OCC_MAX_LINES=$OCC_MAX_LINES")
+fi
+
 open_json=$("$H" "${open_args[@]}" 2>/dev/null)
 
 new=$(printf '%s' "$open_json" | jq -r '.result.plugin_pane.pane.pane_id // empty' 2>/dev/null)

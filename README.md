@@ -6,7 +6,8 @@ terminal.
 
 ## Features
 
-- Reads up to 800 recent lines from Codex or Claude JSONL transcripts.
+- Reads up to 500 recent lines from Codex or Claude JSONL transcripts
+  (set `OCC_MAX_LINES` to change the limit).
 - Falls back to `herdr pane read` for other agents.
 - Organizes prompts, assistant output, tools, paragraphs, lists, quotes,
   headings, tables, and code into selectable blocks.
@@ -46,6 +47,7 @@ description = "output-comment-composer: toggle"
 | --- | --- |
 | `↑` / `k` | Previous semantic block |
 | `↓` / `j` | Next semantic block |
+| `Shift+↑` / `Shift+↓` | Move a full page up / down |
 | `u` / `Page Up` | Move half a page up |
 | `d` / `Page Down` | Move half a page down |
 | `g` / `G` | First / last block |
