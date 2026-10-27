@@ -193,6 +193,28 @@ def page_target(rows: list[tuple[str, int, str]], cursor: int, delta_rows: int) 
     return target
 
 
+def scrollbar_thumb(total_rows: int, visible_rows: int, top: int) -> tuple[int, int] | None:
+    """Return the thumb's (start, size) in the track, or None when nothing scrolls."""
+    if visible_rows <= 0 or total_rows <= visible_rows:
+        return None
+    size = min(visible_rows, max(1, round(visible_rows * visible_rows / total_rows)))
+    max_top = total_rows - visible_rows
+    start = round(min(max(0, top), max_top) / max_top * (visible_rows - size))
+    return start, size
+
+
+def scroll_position_label(total_rows: int, visible_rows: int, top: int) -> str:
+    """Return "top", "end", or a percentage; empty when everything fits."""
+    if total_rows <= visible_rows:
+        return ""
+    max_top = total_rows - visible_rows
+    if top <= 0:
+        return "top"
+    if top >= max_top:
+        return "end"
+    return f"{round(top / max_top * 100)}%"
+
+
 def fetch_transcript(meta: dict[str, str]) -> list[tuple[str, str]]:
     session_id = meta.get("SESSION_ID", "")
     agent = meta.get("AGENT", "")
@@ -774,9 +796,6 @@ class PlainComposer:
             width - len(badge) - 4,
             border_attr,
         )
-        position = f"block {self.cursor + 1}/{len(self.lines)}"
-        meta = f" source {self.source_pane}  ·  {len(self.comments)} comment(s)  ·  {position} "
-        _safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
         _safe_addnstr(screen, 2, 1, "─" * inner_width, inner_width, self.style("muted"))
 
         content_width = max(1, width - 6)
@@ -815,6 +834,23 @@ class PlainComposer:
         self.visible_rows = available
         top = max(0, selected_row - available // 2)
         top = min(top, max(0, len(rows) - available))
+
+        position = f"block {self.cursor + 1}/{len(self.lines)}"
+        scroll_label = scroll_position_label(len(rows), available, top)
+        if scroll_label:
+            position += f" · {scroll_label}"
+        meta = f" source {self.source_pane}  ·  {len(self.comments)} comment(s)  ·  {position} "
+        _safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
+
+        # Scrollbar in the free column just inside the right frame edge.
+        thumb = scrollbar_thumb(len(rows), available, top)
+        if thumb is not None:
+            thumb_start, thumb_size = thumb
+            for offset in range(available):
+                if thumb_start <= offset < thumb_start + thumb_size:
+                    _safe_addnstr(screen, 3 + offset, width - 2, "┃", 1, border_attr)
+                else:
+                    _safe_addnstr(screen, 3 + offset, width - 2, "│", 1, self.style("muted"))
 
         for y, (kind, line_index, text) in enumerate(rows[top : top + available], 3):
             if kind == "spacer":

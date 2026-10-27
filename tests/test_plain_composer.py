@@ -18,6 +18,8 @@ from output_comment_composer_plain import (
     needs_discard_confirmation,
     page_target,
     render_markdown_table,
+    scroll_position_label,
+    scrollbar_thumb,
     selected_color_pair,
     selection_bounds,
     send_comments,
@@ -322,6 +324,26 @@ class PlainComposerTests(unittest.TestCase):
         for invalid in ("abc", "0", "-5"):
             with patch.dict("os.environ", {"OCC_MAX_LINES": invalid}):
                 self.assertEqual(transcript_max_lines(), 500)
+
+    def test_scrollbar_hidden_when_content_fits(self):
+        self.assertIsNone(scrollbar_thumb(10, 10, 0))
+        self.assertIsNone(scrollbar_thumb(3, 10, 0))
+
+    def test_scrollbar_thumb_tracks_position(self):
+        # 100 rows, 10 visible: thumb of 1 row moving through a 10-row track.
+        self.assertEqual(scrollbar_thumb(100, 10, 0), (0, 1))
+        self.assertEqual(scrollbar_thumb(100, 10, 45), (4, 1))
+        self.assertEqual(scrollbar_thumb(100, 10, 90), (9, 1))
+
+    def test_scrollbar_thumb_size_matches_visible_share(self):
+        self.assertEqual(scrollbar_thumb(20, 10, 0), (0, 5))
+        self.assertEqual(scrollbar_thumb(20, 10, 10), (5, 5))
+
+    def test_scroll_position_label(self):
+        self.assertEqual(scroll_position_label(10, 10, 0), "")
+        self.assertEqual(scroll_position_label(100, 10, 0), "top")
+        self.assertEqual(scroll_position_label(100, 10, 45), "50%")
+        self.assertEqual(scroll_position_label(100, 10, 90), "end")
 
     def test_comment_preview_uses_table_header_cells(self):
         self.assertEqual(
