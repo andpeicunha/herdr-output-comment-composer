@@ -273,6 +273,19 @@ class ComposerTests(unittest.TestCase):
             ],
         )
 
+    def test_horizontal_rule_is_its_own_block_and_drawn_as_a_line(self):
+        blocks = group_logical_blocks(["Text before", "", "---", "", "Text after"])
+        self.assertEqual(blocks, ["Text before", "---", "Text after"])
+
+        for rule in ("---", "***", "___", "- - -", "*****"):
+            self.assertEqual(format_markdown_lines([rule], 20), [("─" * 20, "rule")])
+        self.assertEqual(format_markdown_lines(["---"]), [("─" * 40, "rule")])
+
+    def test_rule_like_text_is_not_a_rule(self):
+        self.assertEqual(format_markdown_lines(["--"])[0][1], "normal")
+        self.assertEqual(format_markdown_lines(["- item"])[0][1], "bullet")
+        self.assertEqual(format_markdown_lines(["|---|---|"])[0][1], "table")
+
     def test_code_fence_splits_into_one_block_per_line(self):
         blocks = split_markdown_blocks(
             "Intro.\n\n```md\n### Languages\n\nTypeScript · Go\n  indented\n```\n\nAfter."

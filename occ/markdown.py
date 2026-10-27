@@ -5,6 +5,8 @@ import re
 
 
 _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]\s)")
+# Markdown horizontal rule: ---, ***, or ___ (optionally spaced).
+_RULE_RE = re.compile(r"^(?:-[ \t]*){3,}$|^(?:\*[ \t]*){3,}$|^(?:_[ \t]*){3,}$")
 
 # Markdown pipe rows, or tables already drawn with box characters by the agent UI.
 _TABLE_ROW_PREFIXES = ("|", "│", "┌", "├", "└", "┏", "┣", "┗", "╭", "╰")
@@ -58,7 +60,7 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
         if not stripped:
             flush_paragraph()
             continue
-        if _BLOCK_START_RE.match(stripped):
+        if _BLOCK_START_RE.match(stripped) or _RULE_RE.match(stripped):
             flush_paragraph()
             blocks.append(stripped)
             continue
@@ -251,6 +253,9 @@ def format_markdown_lines(
             continue
         if in_code:
             formatted.append(("  " + line, "code"))
+            continue
+        if _RULE_RE.match(stripped):
+            formatted.append(("─" * min(width or 40, 40), "rule"))
             continue
         heading = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if heading:

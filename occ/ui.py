@@ -206,6 +206,7 @@ class Composer:
             "heading": (curses.COLOR_CYAN, -1),
             "code": (curses.COLOR_GREEN, -1),
             "quote": (curses.COLOR_MAGENTA, -1),
+            "rule": (curses.COLOR_BLUE, -1),
             "bullet": (curses.COLOR_WHITE, -1),
             "table": (curses.COLOR_WHITE, -1),
             "marker": (curses.COLOR_GREEN, -1),
