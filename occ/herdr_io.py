@@ -34,8 +34,8 @@ def fetch_snapshot(source_pane: str) -> list[str]:
     return group_logical_blocks(lines) or ["Source pane is empty."]
 
 
-def copy_blocks_to_clipboard(blocks: list[str], start: int, end: int) -> None:
-    text = "\n\n".join(blocks[start : end + 1])
+def copy_text_to_clipboard(text: str) -> None:
+    """Copy through OSC 52, which works over SSH and inside Herdr panes."""
     encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
     os.write(1, f"\x1b]52;c;{encoded}\a".encode("ascii"))
 

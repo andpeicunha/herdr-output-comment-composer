@@ -8,7 +8,7 @@ import time
 import traceback
 
 from .editor import TextBuffer, needs_discard_confirmation
-from .herdr_io import copy_blocks_to_clipboard, fetch_snapshot, send_comments
+from .herdr_io import copy_text_to_clipboard, fetch_snapshot, send_comments
 from .layout import (
     COMMENT_PREFIX,
     build_display_rows,
@@ -25,7 +25,9 @@ from .markdown import (
     comment_preview,
     expand_transcript_blocks,
     format_markdown_lines,
+    join_blocks,
     mark_inline_markup,
+    split_code_fences,
 )
 from .transcript import fetch_transcript, load_meta
 
@@ -83,6 +85,8 @@ class Composer:
         self.lines = ["Loading snapshot…"]
         self.block_kinds = ["assistant"]
         self.block_starts = [True]
+        # Code role per block ("", "fence", "code", "code_gap"); see split_code_fences.
+        self.block_code = [""]
         self.source_pane = source_pane
         self.meta = meta or {}
         self.cursor = 0
@@ -108,12 +112,15 @@ class Composer:
         transcript = fetch_transcript(self.meta)
         if transcript:
             expanded = expand_transcript_blocks(transcript)
-            self.block_kinds = [kind for kind, _text, _start in expanded]
-            self.lines = [text for _kind, text, _start in expanded]
-            self.block_starts = [start for _kind, _text, start in expanded]
+            self.block_kinds = [kind for kind, _text, _start, _code in expanded]
+            self.lines = [text for _kind, text, _start, _code in expanded]
+            self.block_starts = [start for _kind, _text, start, _code in expanded]
+            self.block_code = [code for _kind, _text, _start, code in expanded]
             source = "transcript"
         else:
-            self.lines = fetch_snapshot(self.source_pane)
+            snapshot = split_code_fences(fetch_snapshot(self.source_pane))
+            self.lines = [text for text, _code in snapshot]
+            self.block_code = [code for _text, code in snapshot]
             self.block_kinds = ["assistant"] * len(self.lines)
             self.block_starts = [index == 0 for index in range(len(self.lines))]
             source = "pane fallback"
@@ -157,7 +164,7 @@ class Composer:
                 self.toggle_selection()
             elif key == ord("y"):
                 start, end = self.current_selection()
-                copy_blocks_to_clipboard(self.lines, start, end)
+                copy_text_to_clipboard(join_blocks(self.lines, self.block_code, start, end))
                 count = end - start + 1
                 self.status = f"Copied {count} block(s)"
             elif key == ord("s"):
@@ -288,21 +295,25 @@ class Composer:
         self, content_width: int
     ) -> tuple[list[tuple[str, str]], list[tuple[str, int, str]]]:
         """Format every block and wrap it into display rows."""
-        markdown = format_markdown_lines(self.lines, content_width)
+        markdown = format_markdown_lines(self.lines, content_width, self.block_code)
         rendered_blocks = []
         for index, (text, _kind) in enumerate(markdown):
             block_kind = self.block_kinds[index]
-            if block_kind == "user":
-                text = mark_inline_markup(self.lines[index])
-            elif block_kind != "assistant":
+            # Assistant blocks and code lines keep the formatted text.
+            if block_kind == "tool":
                 text = self.lines[index]
+            elif block_kind == "user" and not self.block_code[index]:
+                text = mark_inline_markup(self.lines[index])
             rendered_blocks.append(text)
         compact_after = {
             index
             for index in range(len(markdown) - 1)
-            if markdown[index][1] == "bullet"
-            and markdown[index + 1][1] == "bullet"
-            and not self.block_starts[index + 1]
+            if (
+                markdown[index][1] == "bullet"
+                and markdown[index + 1][1] == "bullet"
+                and not self.block_starts[index + 1]
+            )
+            or self.block_code[index + 1] == "code"
         }
         rows = build_display_rows(
             rendered_blocks,

@@ -23,8 +23,10 @@ from occ.markdown import (
     expand_transcript_blocks,
     format_markdown_lines,
     group_logical_blocks,
+    join_blocks,
     mark_inline_markup,
     render_markdown_table,
+    split_code_fences,
     split_markdown_blocks,
 )
 from occ.transcript import (
@@ -218,9 +220,9 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual(
             blocks,
             [
-                "Intro paragraph that wraps onto a second source line.",
-                "- first",
-                "- second",
+                ("Intro paragraph that wraps onto a second source line.", ""),
+                ("- first", ""),
+                ("- second", ""),
             ],
         )
 
@@ -232,9 +234,9 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual(
             expanded,
             [
-                ("assistant", "Paragraph.", True),
-                ("assistant", "- first", False),
-                ("assistant", "- second", False),
+                ("assistant", "Paragraph.", True, ""),
+                ("assistant", "- first", False, ""),
+                ("assistant", "- second", False, ""),
             ],
         )
 
@@ -264,8 +266,57 @@ class ComposerTests(unittest.TestCase):
 
         self.assertEqual(
             blocks,
-            ["Intro.", "| Name | Value |\n|---|---|\n| alpha | 1 |", "After."],
+            [
+                ("Intro.", ""),
+                ("| Name | Value |\n|---|---|\n| alpha | 1 |", ""),
+                ("After.", ""),
+            ],
         )
+
+    def test_code_fence_splits_into_one_block_per_line(self):
+        blocks = split_markdown_blocks(
+            "Intro.\n\n```md\n### Languages\n\nTypeScript · Go\n  indented\n```\n\nAfter."
+        )
+
+        self.assertEqual(
+            blocks,
+            [
+                ("Intro.", ""),
+                ("```md", "fence"),
+                ("### Languages", "code"),
+                ("TypeScript · Go", "code_gap"),
+                ("  indented", "code"),
+                ("After.", ""),
+            ],
+        )
+
+    def test_unclosed_code_fence_keeps_its_lines(self):
+        self.assertEqual(
+            split_code_fences(["```\nline one\nline two"]),
+            [("```", "fence"), ("line one", "code"), ("line two", "code")],
+        )
+
+    def test_code_lines_are_not_formatted_as_markdown(self):
+        formatted = format_markdown_lines(
+            ["```md", "### Languages", "- **item**"], code=["fence", "code", "code"]
+        )
+
+        self.assertEqual(
+            formatted,
+            [
+                ("─ code · md " + "─" * 8, "code"),
+                ("  ### Languages", "code"),
+                ("  - **item**", "code"),
+            ],
+        )
+
+    def test_join_blocks_keeps_code_lines_together(self):
+        lines = ["Intro.", "```md", "### A", "x", "y", "After."]
+        code = ["", "fence", "code", "code_gap", "code", ""]
+
+        self.assertEqual(join_blocks(lines, code, 1, 4), "```md\n### A\n\nx\ny")
+        self.assertEqual(join_blocks(lines, code, 0, 1), "Intro.\n\n```md")
+        self.assertEqual(join_blocks(lines, code, 4, 5), "y\n\nAfter.")
 
     def test_markdown_table_is_rendered_with_aligned_columns(self):
         rendered = render_markdown_table(

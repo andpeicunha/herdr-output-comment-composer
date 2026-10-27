@@ -71,32 +71,68 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
     return blocks
 
 
-def split_markdown_blocks(text: str) -> list[str]:
-    """Split one transcript message into independently selectable blocks."""
-    blocks = group_logical_blocks(text.splitlines())
-    expanded: list[str] = []
+def split_code_fences(blocks: list[str]) -> list[tuple[str, str]]:
+    """Split fenced code blocks into one selectable block per code line.
+
+    Returns (text, code role) pairs. The role is "" for normal blocks, "fence" for the
+    opening fence line, "code" for a line that directly follows the previous one, and
+    "code_gap" for a line that follows one or more blank lines.
+    """
+    expanded: list[tuple[str, str]] = []
     for block in blocks:
-        if re.search(r"(?:^|\s)•\s+", block) and block.count("•") > 1:
+        if not block.lstrip().startswith(("```", "~~~")):
+            expanded.append((block, ""))
+            continue
+        opening, *body = block.split("\n")
+        if body and body[-1].strip().startswith(("```", "~~~")):
+            body = body[:-1]
+        expanded.append((opening.strip(), "fence"))
+        gap = False
+        for line in body:
+            if not line.strip():
+                gap = True
+                continue
+            expanded.append((line.rstrip(), "code_gap" if gap else "code"))
+            gap = False
+    return expanded
+
+
+def split_markdown_blocks(text: str) -> list[tuple[str, str]]:
+    """Split one transcript message into selectable (text, code role) blocks."""
+    expanded: list[tuple[str, str]] = []
+    for block, code in split_code_fences(group_logical_blocks(text.splitlines())):
+        if not code and re.search(r"(?:^|\s)•\s+", block) and block.count("•") > 1:
             expanded.extend(
-                f"• {item.strip()}"
+                (f"• {item.strip()}", "")
                 for item in re.split(r"\s*•\s+", block)
                 if item.strip()
             )
         else:
-            expanded.append(block)
+            expanded.append((block, code))
     return expanded
 
 
 def expand_transcript_blocks(
     blocks: list[tuple[str, str]],
-) -> list[tuple[str, str, bool]]:
-    """Preserve roles while splitting messages into semantic Markdown blocks."""
-    expanded: list[tuple[str, str, bool]] = []
+) -> list[tuple[str, str, bool, str]]:
+    """Preserve roles while splitting messages into semantic Markdown blocks.
+
+    Returns (kind, text, is_message_start, code role) tuples.
+    """
+    expanded: list[tuple[str, str, bool, str]] = []
     for kind, text in blocks:
-        message_blocks = [text] if kind == "tool" else split_markdown_blocks(text)
-        for index, block in enumerate(message_blocks):
-            expanded.append((kind, block, index == 0))
+        message_blocks = [(text, "")] if kind == "tool" else split_markdown_blocks(text)
+        for index, (block, code) in enumerate(message_blocks):
+            expanded.append((kind, block, index == 0, code))
     return expanded
+
+
+def join_blocks(lines: list[str], code: list[str], start: int, end: int) -> str:
+    """Join a selected range for copying; consecutive code lines keep single newlines."""
+    text = lines[start]
+    for index in range(start + 1, end + 1):
+        text += ("\n" if code[index] == "code" else "\n\n") + lines[index]
+    return text
 
 
 def mark_inline_markup(text: str) -> str:
@@ -177,12 +213,27 @@ def render_markdown_table(block: str, width: int = 0) -> str:
     return "\n".join(rendered)
 
 
-def format_markdown_lines(lines: list[str], width: int = 0) -> list[tuple[str, str]]:
-    """Return simplified terminal text and a whole-line Markdown style name."""
+def format_markdown_lines(
+    lines: list[str], width: int = 0, code: list[str] | None = None
+) -> list[tuple[str, str]]:
+    """Return simplified terminal text and a whole-line Markdown style name.
+
+    ``code`` holds each block's code role from ``split_code_fences``; code lines are
+    shown as-is, never parsed as Markdown.
+    """
     formatted: list[tuple[str, str]] = []
     in_code = False
-    for line in lines:
+    for index, line in enumerate(lines):
         stripped = line.strip()
+        role = code[index] if code else ""
+        if role == "fence":
+            language = stripped.lstrip("`~").strip()
+            label = f"─ code · {language} " if language else "─ code "
+            formatted.append((label + "─" * 8, "code"))
+            continue
+        if role:
+            formatted.append(("  " + line, "code"))
+            continue
         if not in_code and is_markdown_table(line):
             formatted.append((render_markdown_table(line, width), "table"))
             continue
