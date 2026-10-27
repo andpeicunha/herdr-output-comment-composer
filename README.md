@@ -48,6 +48,13 @@ command = "andpeicunha.output-comment-composer.toggle"
 description = "output-comment-composer: toggle"
 ```
 
+### Commenting
+
+Move to a block and press `c` to comment on it. Comments appear under the
+block, or the single code line, they refer to:
+
+![Inline comments under a paragraph and under one line of a code fence](docs/inline-comments.png)
+
 ### Keys
 
 While navigating:
@@ -67,6 +74,8 @@ While navigating:
 | `q` / `Esc` | Close the composer |
 
 While the comment box is open:
+
+![The comment box open at the bottom of the composer, with its key hints](docs/comment-box.png)
 
 | Key | Action |
 | --- | --- |
