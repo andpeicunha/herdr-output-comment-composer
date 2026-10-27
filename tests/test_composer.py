@@ -1,4 +1,5 @@
 import os
+import tempfile
 import unittest
 
 from unittest.mock import patch
@@ -29,6 +30,7 @@ from occ.markdown import (
     split_code_fences,
     split_markdown_blocks,
 )
+from occ.settings import parse_config_env, setting
 from occ.transcript import (
     codex_transcript_blocks,
     limit_transcript_blocks,
@@ -510,6 +512,30 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual(scroll_position_label(100, 10, 0), "top")
         self.assertEqual(scroll_position_label(100, 10, 45), "50%")
         self.assertEqual(scroll_position_label(100, 10, 90), "end")
+
+    def test_parse_config_env_handles_comments_quotes_and_export(self):
+        text = "# comment\n\nOCC_SIGNATURE='@me'\nexport OCC_MAX_LINES = 800\nBROKEN\n=x\n"
+
+        self.assertEqual(
+            parse_config_env(text), {"OCC_SIGNATURE": "@me", "OCC_MAX_LINES": "800"}
+        )
+
+    def test_setting_reads_config_file_and_env_wins(self):
+        with tempfile.TemporaryDirectory() as config_dir:
+            with open(os.path.join(config_dir, "config.env"), "w", encoding="utf-8") as config:
+                config.write("OCC_SIGNATURE=@from-file\nOCC_MAX_LINES=120\n")
+            base = {"HERDR_PLUGIN_CONFIG_DIR": config_dir}
+            with patch.dict("os.environ", base, clear=True):
+                self.assertEqual(setting("OCC_SIGNATURE"), "@from-file")
+                self.assertEqual(transcript_max_lines(), 120)
+                self.assertEqual(setting("MISSING", "fallback"), "fallback")
+            with patch.dict("os.environ", {**base, "OCC_SIGNATURE": "@from-env"}, clear=True):
+                self.assertEqual(setting("OCC_SIGNATURE"), "@from-env")
+
+    def test_setting_without_config_dir_uses_default(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(setting("OCC_SIGNATURE"), "")
+            self.assertEqual(transcript_max_lines(), 500)
 
     def test_comment_preview_uses_table_header_cells(self):
         self.assertEqual(

@@ -14,12 +14,11 @@ if [ -n "${HERDR_PLUGIN_CONTEXT_JSON:-}" ]; then
   cwd=$(printf '%s' "$HERDR_PLUGIN_CONTEXT_JSON" | jq -r '.focused_pane_cwd // .workspace_cwd // empty' 2>/dev/null)
 fi
 
-_early_log="${TMPDIR:-/tmp}/output-comment-composer-debug"
-mkdir -p "$_early_log"
-echo "start mode=$mode ws=${HERDR_WORKSPACE_ID:-} pane=${HERDR_PANE_ID:-}" >> "$_early_log/bash.log"
+# Runtime state lives in the plugin state dir (see herdr plugin docs); stderr
+# goes to the plugin command log (herdr plugin log list --plugin <id>).
+state_dir="${HERDR_PLUGIN_STATE_DIR:-${TMPDIR:-/tmp}/output-comment-composer}"
 
 refuse() {
-  echo "refuse: $1" >> "$_early_log/bash.log"
   printf 'output-comment-composer: %s\n' "$1" >&2
   exit 1
 }
@@ -80,25 +79,19 @@ open)
   ;;
 esac
 
-tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/output-comment-composer.XXXXXX") || refuse "cannot create temp dir"
-meta_file="$tmp_dir/meta.env"
-debug_dir="${TMPDIR:-/tmp}/output-comment-composer-debug"
-mkdir -p "$debug_dir"
-echo "bash:start source=$source_pane ws=$ws" >> "$debug_dir/bash.log"
+mkdir -p "$state_dir" || refuse "cannot create state dir $state_dir"
+# One metadata file per workspace, replaced on every open.
+meta_file="$state_dir/meta-${ws//[^A-Za-z0-9_.-]/_}.env"
 
-# Extract session_id from herdr pane list
-session_id=$("$H" pane list --workspace "$ws" 2>/dev/null \
+# Session id and agent type of the source pane (best-effort).
+session_id=$(printf '%s' "$panes_json" \
   | jq -r --arg p "$source_pane" \
       '.result.panes[] | select(.pane_id == $p) | .agent_session.value // empty' \
   2>/dev/null || true)
-
-# Detect agent type from pane metadata (best-effort)
-agent=$("$H" pane list --workspace "$ws" 2>/dev/null \
+agent=$(printf '%s' "$panes_json" \
   | jq -r --arg p "$source_pane" \
       '.result.panes[] | select(.pane_id == $p) | .agent_session.agent // empty' \
   2>/dev/null || true)
-
-echo "bash:meta session_id=${session_id:-<empty>} agent=${agent:-<empty>} cwd=${cwd:-<empty>}" >> "$debug_dir/bash.log"
 
 cat >"$meta_file" <<EOF
 SOURCE_PANE_ID=$source_pane
@@ -114,7 +107,6 @@ open_args=(
   --placement zoomed
   --target-pane "$source_pane"
   --env "OUTPUT_COMMENT_COMPOSER_META=$meta_file"
-  --env "OCC_DEBUG_DIR=$debug_dir"
   --focus
 )
 
@@ -134,4 +126,4 @@ open_json=$("$H" "${open_args[@]}" 2>/dev/null)
 
 new=$(printf '%s' "$open_json" | jq -r '.result.plugin_pane.pane.pane_id // empty' 2>/dev/null)
 [ -n "$new" ] || refuse "herdr plugin pane open failed"
-printf 'opened %s (overlay) in %s\n' "$new" "$ws"
+printf 'opened %s (zoomed) in %s\n' "$new" "$ws"

@@ -7,6 +7,7 @@ import re
 import subprocess
 
 from .markdown import group_logical_blocks
+from .settings import setting
 
 
 _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
@@ -60,7 +61,7 @@ def send_comments(
     source_pane: str, lines: list[str], comments: dict[int, str]
 ) -> tuple[bool, str]:
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-    prompt = build_prompt(lines, comments, os.environ.get("OCC_SIGNATURE", "").strip())
+    prompt = build_prompt(lines, comments, setting("OCC_SIGNATURE").strip())
     result = subprocess.run(
         [herdr, "agent", "prompt", source_pane, prompt],
         stdout=subprocess.DEVNULL,

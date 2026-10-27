@@ -5,6 +5,8 @@ import json
 import os
 import re
 
+from .settings import setting
+
 
 _TRANSCRIPT_MAX_LINES = 500
 
@@ -148,9 +150,9 @@ def _find_claude_transcript(session_id: str) -> str | None:
 
 
 def transcript_max_lines() -> int:
-    """Return the transcript line budget, overridable with ``OCC_MAX_LINES``."""
+    """Return the transcript line budget, overridable with the ``OCC_MAX_LINES`` setting."""
     try:
-        value = int(os.environ.get("OCC_MAX_LINES", ""))
+        value = int(setting("OCC_MAX_LINES"))
     except ValueError:
         return _TRANSCRIPT_MAX_LINES
     return value if value > 0 else _TRANSCRIPT_MAX_LINES

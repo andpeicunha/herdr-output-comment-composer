@@ -634,10 +634,13 @@ def main() -> None:
 
 
 def log_crash() -> None:
-    debug_dir = os.environ.get("OCC_DEBUG_DIR", "/tmp/output-comment-composer-debug")
+    """Append the current traceback to crash.log in the plugin state dir."""
+    state_dir = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(
+        os.environ.get("TMPDIR", "/tmp"), "output-comment-composer"
+    )
     try:
-        os.makedirs(debug_dir, exist_ok=True)
-        with open(os.path.join(debug_dir, "plain-crash.log"), "a", encoding="utf-8") as log:
+        os.makedirs(state_dir, exist_ok=True)
+        with open(os.path.join(state_dir, "crash.log"), "a", encoding="utf-8") as log:
             log.write(
                 f"pid={os.getpid()} TERM={os.environ.get('TERM', '')!r} "
                 f"tty_in={os.isatty(0)} tty_out={os.isatty(1)}\n"

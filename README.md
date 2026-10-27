@@ -26,7 +26,7 @@ terminal.
 
 ## Requirements
 
-- [Herdr](https://herdr.io) 0.7.5 or newer.
+- [Herdr](https://herdr.io) 0.9.5 or newer.
 - Python 3 with `curses` support.
 - `jq` for the Herdr pane launcher.
 
@@ -87,15 +87,26 @@ While the comment box is open:
 Use your terminal's paste shortcut, usually `Ctrl+Shift+V`, inside the comment
 box.
 
-### Environment variables
+### Settings
 
-Set these in the environment Herdr runs in; the launcher forwards them to the
-composer pane.
+Put settings in `config.env` inside the plugin config directory:
 
-| Variable | Default | Effect |
+```sh
+cd "$(herdr plugin config-dir andpeicunha.output-comment-composer)"
+printf 'OCC_SIGNATURE=@your-handle\nOCC_MAX_LINES=800\n' > config.env
+```
+
+The file is read each time the composer opens and survives plugin updates.
+An environment variable with the same name, set where Herdr runs, overrides it.
+
+| Setting | Default | Effect |
 | --- | --- | --- |
 | `OCC_MAX_LINES` | `500` | Transcript lines to load |
 | `OCC_SIGNATURE` | unset | Signature line appended to the sent prompt, e.g. `@your-handle` |
+
+Runtime files (per-workspace pane metadata and `crash.log`) live in the plugin
+state directory. Launcher errors appear in
+`herdr plugin log list --plugin andpeicunha.output-comment-composer`.
 
 ## What gets sent
 
@@ -122,7 +133,7 @@ Do this before tagging.
 — @your-handle
 ```
 
-The signature line only appears when `OCC_SIGNATURE` is set.
+The signature line only appears when `OCC_SIGNATURE` is set (see [Settings](#settings)).
 
 ## How it works
 
@@ -159,6 +170,7 @@ Project layout:
 | `occ/layout.py` | Display rows, paging, and scrollbar math |
 | `occ/editor.py` | `TextBuffer`, the comment editor's text model |
 | `occ/herdr_io.py` | Herdr pane reads, clipboard copy, and prompt sending |
+| `occ/settings.py` | Settings from the environment and `config.env` |
 | `occ/ui.py` | The `curses` interface |
 
 For local testing:
