@@ -49,6 +49,19 @@ class PlainComposerTests(unittest.TestCase):
         self.assertIn("> one", prompt)
         self.assertIn("> three", prompt)
 
+    def test_build_prompt_labels_blocks_and_quotes_every_line(self):
+        prompt = build_prompt(["intro", "| a |\n| b |"], {1: "fix table"})
+
+        self.assertIn("Comment 1 on block 2:", prompt)
+        self.assertNotIn("lines", prompt)
+        self.assertIn("> | a |\n> | b |", prompt)
+
+    def test_build_prompt_signature_is_optional(self):
+        self.assertNotIn("—", build_prompt(["one"], {0: "x"}))
+        self.assertTrue(
+            build_prompt(["one"], {0: "x"}, signature="@someone").endswith("\n\n— @someone\n")
+        )
+
     def test_multiline_comment_gets_one_display_row_per_line(self):
         rows = build_display_rows(["one"], {0: "first\nsecond"})
 

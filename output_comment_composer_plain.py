@@ -535,22 +535,27 @@ def editor_cursor_position(
     return index, column - start
 
 
-def build_prompt(lines: list[str], comments: dict[int, str]) -> str:
+def build_prompt(lines: list[str], comments: dict[int, str], signature: str = "") -> str:
     parts = ["Please address these comments on your previous output:"]
-    for number, line_index in enumerate(sorted(comments), 1):
-        parts.append(
-            f"Comment {number} on lines {line_index + 1}–{line_index + 1}:\n\n"
-            f"> {lines[line_index]}\n\n"
-            f"Comment:\n{comments[line_index]}"
+    for number, block_index in enumerate(sorted(comments), 1):
+        quoted = "\n".join(
+            f"> {line}".rstrip() for line in lines[block_index].splitlines() or [""]
         )
-    return "\n\n".join(parts) + "\n\n— @andpeicunha\n"
+        parts.append(
+            f"Comment {number} on block {block_index + 1}:\n\n"
+            f"{quoted}\n\n"
+            f"Comment:\n{comments[block_index]}"
+        )
+    if signature:
+        parts.append(f"— {signature}")
+    return "\n\n".join(parts) + "\n"
 
 
 def send_comments(
     source_pane: str, lines: list[str], comments: dict[int, str]
 ) -> tuple[bool, str]:
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-    prompt = build_prompt(lines, comments)
+    prompt = build_prompt(lines, comments, os.environ.get("OCC_SIGNATURE", "").strip())
     result = subprocess.run(
         [herdr, "agent", "prompt", source_pane, prompt],
         stdout=subprocess.DEVNULL,

@@ -64,6 +64,16 @@ description = "output-comment-composer: toggle"
 Use your terminal's paste shortcut, usually `Ctrl+Shift+V`, inside the comment
 editor.
 
+### Environment variables
+
+Set these in the environment Herdr runs in; the launcher forwards them to the
+composer pane.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `OCC_MAX_LINES` | `500` | Transcript lines to load |
+| `OCC_SIGNATURE` | unset | Signature line appended to the sent prompt, e.g. `@your-handle` |
+
 ## How it works
 
 1. The plugin reads the current agent session metadata from Herdr.
