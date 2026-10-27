@@ -4,34 +4,7 @@ A keyboard-first [Herdr](https://herdr.io) plugin for reviewing agent output,
 adding inline comments, and sending structured feedback without leaving the
 terminal.
 
-```
-┏━ ✎ COMMENTS  Output Comment Composer ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ source w1:p1  ·  2 comment(s)  ·  block 7/11 · end                               ┃
-┃──────────────────────────────────────────────────────────────────────────────────┃
-┃                                                                                 │┃
-┃  Check │ Status │ Notes                                                         │┃
-┃  ──────┼────────┼───────────────────                                            │┃
-┃  Tests │ pass   │ 52 tests in 0.004s                                            ┃┃
-┃  Lint  │ warn   │ one unused import                                             ┃┃
-┃                                                                                 ┃┃
-┃  Apply this config:                                                             ┃┃
-┃                                                                                 ┃┃
-┃  ─ code · toml ────────                                                         ┃┃
-┃    [release]                                                                    ┃┃
-┃    version = "0.4.0"                                                            ┃┃
-┃  ╰─ comment: Use 0.4.1, 0.4.0 is already taken.                                 ┃┃
-┃    notes = true                                                                 ┃┃
-┃                                                                                 ┃┃
-┃    • Ship after the lint fix.                                                   ┃┃
-┃  ╰─ comment: Do this before tagging.                                            ┃┃
-┃    • Tag the release on main.                                                   ┃┃
-┃                                                                                 ┃┃
-┃  Want me to open the pull request?                                              ┃┃
-┃──────────────────────────────────────────────────────────────────────────────────┃
-┃ Comment saved on block 9                                                         ┃
-┃ ↑/↓ move · ⇧↑/↓ page · Space select · y copy · c comment · s send · q close      ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
+![Output Comment Composer reviewing an agent answer in Herdr](docs/preview.png)
 
 ## Features
 
@@ -118,7 +91,7 @@ composer pane.
 ## What gets sent
 
 `s` sends one prompt to the source agent. Each comment names its block and
-quotes the commented text. For the preview above:
+quotes the commented text. For example:
 
 ```
 Please address these comments on your previous output:
