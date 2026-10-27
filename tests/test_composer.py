@@ -3,37 +3,39 @@ import unittest
 
 from unittest.mock import patch
 
-from output_comment_composer_plain import (
-    BOLD_OFF,
-    BOLD_ON,
-    bold_segments,
+from occ.editor import TextBuffer, needs_discard_confirmation
+from occ.herdr_io import build_prompt, send_comments
+from occ.layout import (
     build_display_rows,
-    build_prompt,
-    codex_transcript_blocks,
-    comment_preview,
     content_rows_available,
     editor_cursor_position,
     editor_visual_rows,
+    page_target,
+    scroll_position_label,
+    scrollbar_thumb,
+    selection_bounds,
+)
+from occ.markdown import (
+    BOLD_OFF,
+    BOLD_ON,
+    bold_segments,
+    comment_preview,
     expand_transcript_blocks,
     format_markdown_lines,
     group_logical_blocks,
-    limit_transcript_blocks,
     mark_inline_markup,
-    needs_discard_confirmation,
-    page_target,
     render_markdown_table,
-    scroll_position_label,
-    scrollbar_thumb,
-    selected_color_pair,
-    selection_bounds,
-    send_comments,
     split_markdown_blocks,
-    TextBuffer,
+)
+from occ.transcript import (
+    codex_transcript_blocks,
+    limit_transcript_blocks,
     transcript_max_lines,
 )
+from occ.ui import selected_color_pair
 
 
-class PlainComposerTests(unittest.TestCase):
+class ComposerTests(unittest.TestCase):
     def test_comment_is_rendered_after_its_source_line(self):
         rows = build_display_rows(["one", "two", "three"], {1: "teste"})
 
@@ -236,7 +238,7 @@ class PlainComposerTests(unittest.TestCase):
             ],
         )
 
-    @patch("output_comment_composer_plain.subprocess.run")
+    @patch("occ.herdr_io.subprocess.run")
     def test_send_uses_agent_prompt(self, run):
         run.return_value.returncode = 0
         run.return_value.stderr = ""

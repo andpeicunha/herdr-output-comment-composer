@@ -99,6 +99,18 @@ network access after it receives the feedback prompt.
 python3 -m unittest discover -s tests -v
 ```
 
+Project layout:
+
+| Path | Contents |
+| --- | --- |
+| `output_comment_composer.py` | Entry point started by `bin/output-comment-composer` |
+| `occ/transcript.py` | Codex and Claude JSONL transcript loading |
+| `occ/markdown.py` | Block grouping, inline Markdown, and tables |
+| `occ/layout.py` | Display rows, paging, and scrollbar math |
+| `occ/editor.py` | `TextBuffer`, the comment editor's text model |
+| `occ/herdr_io.py` | Herdr pane reads, clipboard copy, and prompt sending |
+| `occ/ui.py` | The `curses` interface |
+
 For local testing:
 
 ```sh
