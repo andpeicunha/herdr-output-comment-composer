@@ -20,7 +20,8 @@ BOLD_ON = "\x01"
 
 BOLD_OFF = "\x02"
 
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|(?<!\w)__(.+?)__(?!\w)")
+_CODE_SPAN_RE = re.compile(r"`([^`]+)`")
+_BOLD_DELIMITER_RE = re.compile(r"\*\*|__")
 
 
 def group_logical_blocks(lines: list[str]) -> list[str]:
@@ -68,8 +69,10 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
             continue
         if _BLOCK_START_RE.match(stripped) or _RULE_RE.match(stripped):
             flush_paragraph()
-            blocks.append(stripped)
-            list_item_open = bool(_LIST_ITEM_RE.match(stripped)) and not _RULE_RE.match(stripped)
+            is_item = bool(_LIST_ITEM_RE.match(stripped)) and not _RULE_RE.match(stripped)
+            # List items keep their indentation, which is their nesting level.
+            blocks.append(line.expandtabs(4).rstrip() if is_item else stripped)
+            list_item_open = is_item
             continue
         if list_item_open:
             blocks[-1] += " " + stripped
@@ -150,14 +153,40 @@ def join_blocks(lines: list[str], code: list[str], start: int, end: int) -> str:
 def mark_inline_markup(text: str) -> str:
     """Replace **bold**/__bold__ with BOLD_ON/BOLD_OFF markers and unwrap `code`.
 
-    Code spans are kept literal, so `__init__` is not mistaken for bold.
+    Code spans stay literal (`__init__` is not bold, `**` inside code is text), but a
+    bold phrase may contain code spans: **the `userId` field** is one bold span.
+    Markers that never find a partner stay as literal text.
     """
-    parts = re.split(r"`([^`]+)`", text)
-    for index in range(0, len(parts), 2):
-        parts[index] = _BOLD_RE.sub(
-            lambda m: f"{BOLD_ON}{m.group(1) or m.group(2)}{BOLD_OFF}", parts[index]
-        )
-    return "".join(parts)
+    spans = list(_CODE_SPAN_RE.finditer(text))
+    # Same length as ``text`` with code spans blanked out, so only real markup is found.
+    flat = text
+    for span in reversed(spans):
+        flat = flat[: span.start()] + "\x00" * (span.end() - span.start()) + flat[span.end() :]
+
+    edits: list[tuple[int, int, str]] = [(s.start(), s.end(), s.group(1)) for s in spans]
+    open_at: dict[str, int] = {}
+    for match in _BOLD_DELIMITER_RE.finditer(flat):
+        kind, start, end = match.group(), match.start(), match.end()
+        before = flat[start - 1] if start else " "
+        after = flat[end] if end < len(flat) else " "
+        if kind == "__":
+            can_open = not (before.isalnum() or before == "_") and not after.isspace()
+            can_close = not (after.isalnum() or after == "_") and not before.isspace()
+        else:
+            can_open = not after.isspace()
+            can_close = not before.isspace()
+        if kind in open_at and can_close and start > open_at[kind] + 2:
+            opener = open_at.pop(kind)
+            edits += [(opener, opener + 2, BOLD_ON), (start, end, BOLD_OFF)]
+        elif can_open and kind not in open_at:
+            open_at[kind] = start
+
+    pieces, position = [], 0
+    for start, end, replacement in sorted(edits):
+        pieces += [text[position:start], replacement]
+        position = end
+    pieces.append(text[position:])
+    return "".join(pieces)
 
 
 def _strip_inline_markup(text: str) -> str:
@@ -235,9 +264,23 @@ def format_markdown_lines(
     """
     formatted: list[tuple[str, str]] = []
     in_code = False
+    indent_stack: list[int] = []
+
+    def list_level(item: str) -> int:
+        """Nesting level of a list item from its indentation (any step size)."""
+        expanded = item.expandtabs(4)
+        indent = len(expanded) - len(expanded.lstrip())
+        while indent_stack and indent_stack[-1] > indent:
+            indent_stack.pop()
+        if not indent_stack or indent_stack[-1] < indent:
+            indent_stack.append(indent)
+        return len(indent_stack) - 1
+
     for index, line in enumerate(lines):
         stripped = line.strip()
         role = code[index] if code else ""
+        if role or not _LIST_ITEM_RE.match(stripped):
+            indent_stack.clear()
         if role == "fence":
             language = stripped.lstrip("`~").strip()
             label = f"─ code · {language} " if language else "─ code "
@@ -277,11 +320,16 @@ def format_markdown_lines(
             continue
         bullet = re.match(r"^\s*[-*+]\s+(.*)$", line)
         if bullet:
-            formatted.append(("  • " + mark_inline_markup(bullet.group(1)), "bullet"))
+            level = list_level(line)
+            marker = "•" if level == 0 else "◦"
+            formatted.append(
+                ("  " * (level + 1) + f"{marker} " + mark_inline_markup(bullet.group(1)), "bullet")
+            )
             continue
         numbered = re.match(r"^\s*(\d+[.)])\s+(.*)$", line)
         if numbered:
-            formatted.append((f"  {numbered.group(1)} {mark_inline_markup(numbered.group(2))}", "bullet"))
+            indent = "  " * (list_level(line) + 1)
+            formatted.append((f"{indent}{numbered.group(1)} {mark_inline_markup(numbered.group(2))}", "bullet"))
             continue
         if re.search(r"(?:^|\s)•\s+", line):
             items = [item.strip() for item in re.split(r"\s*•\s+", line) if item.strip()]

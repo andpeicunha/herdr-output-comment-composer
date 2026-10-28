@@ -1,9 +1,12 @@
 """Pure layout math: display rows, selection, paging, and the scrollbar."""
 from __future__ import annotations
 
+import re
 import textwrap
 
 
+# Start of a wrapped list item or quote; wrapped rows are indented under its text.
+_HANGING_RE = re.compile(r"^\s*(?:[•◦│]|\d+[.)])\s+")
 COMMENT_PREFIX = "  ╰─ comment: "
 
 
@@ -14,7 +17,14 @@ def build_display_rows(
     spacing: bool = False,
     compact_after: set[int] | None = None,
     no_wrap: set[int] | None = None,
+    preserve_space: set[int] | None = None,
 ) -> list[tuple[str, int, str]]:
+    """Wrap blocks into display rows.
+
+    Blocks in ``no_wrap`` (tables) are cut instead of wrapped. Blocks in
+    ``preserve_space`` (code) keep their whitespace; for the others, whitespace at a
+    break is dropped and wrapped list items get a hanging indent.
+    """
     rows: list[tuple[str, int, str]] = []
     for index, line in enumerate(lines):
         first_row = True
@@ -25,11 +35,14 @@ def build_display_rows(
             elif index in (no_wrap or set()):
                 wrapped = [physical_line[:width]]
             else:
+                keep = index in (preserve_space or set())
+                hanging = None if keep else _HANGING_RE.match(physical_line)
                 wrapped = textwrap.wrap(
                     physical_line,
                     width=max(1, width),
                     replace_whitespace=False,
-                    drop_whitespace=False,
+                    drop_whitespace=not keep,
+                    subsequent_indent=" " * min(len(hanging.group()), width // 2) if hanging else "",
                 )
             for wrapped_line in wrapped or [""]:
                 kind = "line" if first_row else "continuation"

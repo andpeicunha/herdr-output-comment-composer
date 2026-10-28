@@ -327,6 +327,7 @@ class Composer:
                 for index, (_text, kind) in enumerate(markdown)
                 if kind == "table" and self.block_kinds[index] == "assistant"
             },
+            preserve_space={index for index, (_text, kind) in enumerate(markdown) if kind == "code"},
         )
         return markdown, rows
 
