@@ -275,6 +275,34 @@ class ComposerTests(unittest.TestCase):
             ],
         )
 
+    def test_wrapped_list_items_stay_one_block(self):
+        lines = [
+            "- A receita lista os ingredientes na ordem em que entram. Primeiro o",
+            "  tempero, depois o molho, sempre mexendo devagar.",
+            "- Misture com cuidado (ex.: use uma colher de",
+            "pau) para não quebrar.",
+            "1. Separe os ingredientes na bancada",
+            "   e meça cada quantidade.",
+            "",
+            "Parágrafo depois.",
+        ]
+
+        self.assertEqual(
+            group_logical_blocks(lines),
+            [
+                "- A receita lista os ingredientes na ordem em que entram. Primeiro o tempero, depois o molho, sempre mexendo devagar.",
+                "- Misture com cuidado (ex.: use uma colher de pau) para não quebrar.",
+                "1. Separe os ingredientes na bancada e meça cada quantidade.",
+                "Parágrafo depois.",
+            ],
+        )
+
+    def test_blank_line_or_new_block_ends_a_list_item(self):
+        self.assertEqual(
+            group_logical_blocks(["- item", "", "paragraph", "- next", "## Heading", "text", "---", "after"]),
+            ["- item", "paragraph", "- next", "## Heading", "text", "---", "after"],
+        )
+
     def test_horizontal_rule_is_its_own_block_and_drawn_as_a_line(self):
         blocks = group_logical_blocks(["Text before", "", "---", "", "Text after"])
         self.assertEqual(blocks, ["Text before", "---", "Text after"])

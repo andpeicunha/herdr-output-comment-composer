@@ -6,6 +6,8 @@ import re
 
 _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]\s)")
 # Markdown horizontal rule: ---, ***, or ___ (optionally spaced).
+# A list item; non-blank lines right after it continue the item (Markdown lazy continuation).
+_LIST_ITEM_RE = re.compile(r"^(?:[-*+]\s|\d+[.)]\s)")
 _RULE_RE = re.compile(r"^(?:-[ \t]*){3,}$|^(?:\*[ \t]*){3,}$|^(?:_[ \t]*){3,}$")
 
 # Markdown pipe rows, or tables already drawn with box characters by the agent UI.
@@ -28,6 +30,7 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
     code: list[str] = []
     table: list[str] = []
     in_code = False
+    list_item_open = False
 
     def flush_paragraph() -> None:
         if paragraph:
@@ -44,10 +47,12 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
         if not in_code and stripped.startswith(_TABLE_ROW_PREFIXES):
             flush_paragraph()
             table.append(stripped)
+            list_item_open = False
             continue
         flush_table()
         if stripped.startswith(("```", "~~~")):
             flush_paragraph()
+            list_item_open = False
             code.append(line)
             in_code = not in_code
             if not in_code:
@@ -59,10 +64,15 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
             continue
         if not stripped:
             flush_paragraph()
+            list_item_open = False
             continue
         if _BLOCK_START_RE.match(stripped) or _RULE_RE.match(stripped):
             flush_paragraph()
             blocks.append(stripped)
+            list_item_open = bool(_LIST_ITEM_RE.match(stripped)) and not _RULE_RE.match(stripped)
+            continue
+        if list_item_open:
+            blocks[-1] += " " + stripped
             continue
         paragraph.append(line)
 
