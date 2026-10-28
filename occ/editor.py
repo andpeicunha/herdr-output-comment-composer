@@ -37,6 +37,11 @@ class TextBuffer:
             self.row -= 1
             self.col = previous_length
 
+    def clear_line(self) -> None:
+        """Erase the whole current line (Ctrl+U)."""
+        self.lines[self.row] = ""
+        self.col = 0
+
     def move_left(self) -> None:
         if self.col > 0:
             self.col -= 1

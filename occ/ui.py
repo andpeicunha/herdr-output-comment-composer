@@ -50,6 +50,7 @@ _EDITOR_KEYS = {
     "\b": TextBuffer.backspace,
     "\x7f": TextBuffer.backspace,
     curses.KEY_BACKSPACE: TextBuffer.backspace,
+    "\x15": TextBuffer.clear_line,  # Ctrl+U
     curses.KEY_LEFT: TextBuffer.move_left,
     curses.KEY_RIGHT: TextBuffer.move_right,
     curses.KEY_UP: TextBuffer.move_up,
@@ -482,7 +483,7 @@ class Composer:
             visual_rows[self.edit_top : self.edit_top + inner_height], 1
         ):
             _safe_addnstr(screen, top + offset, 2, text, inner_width)
-        help_text = " Ctrl+S save · Tab next · Shift+Tab prev · Enter new line · Esc cancel "
+        help_text = " Ctrl+S save · Ctrl+U clear · Tab/⇧Tab next/prev · Enter newline · Esc cancel "
         _safe_addnstr(screen, height - 1, 2, help_text, width - 4, self.style("muted"))
         try:
             screen.move(top + 1 + cursor_row - self.edit_top, 2 + min(cursor_col, inner_width - 1))

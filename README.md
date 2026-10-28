@@ -84,6 +84,7 @@ While the comment box is open:
 | `Enter` | New line |
 | `Tab` / `Shift+Tab` | Save and keep typing on the next / previous block |
 | `Ctrl+S` | Save the comment and close the box |
+| `Ctrl+U` | Clear the current line |
 | `Esc` | Cancel; asks before discarding changes |
 
 Use your terminal's paste shortcut, usually `Ctrl+Shift+V`, inside the comment

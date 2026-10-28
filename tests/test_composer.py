@@ -36,7 +36,7 @@ from occ.transcript import (
     limit_transcript_blocks,
     transcript_max_lines,
 )
-from occ.ui import selected_color_pair
+from occ.ui import _EDITOR_KEYS, selected_color_pair
 
 
 class ComposerTests(unittest.TestCase):
@@ -573,6 +573,17 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual((buffer.row, buffer.col), (0, 2))
         buffer.backspace()
         self.assertEqual(buffer.text, "acd")
+
+    def test_text_buffer_clear_line_erases_only_the_current_line(self):
+        buffer = TextBuffer("one\ntwo\nthree")
+        buffer.row, buffer.col = 1, 2
+        buffer.clear_line()
+
+        self.assertEqual(buffer.text, "one\n\nthree")
+        self.assertEqual((buffer.row, buffer.col), (1, 0))
+
+    def test_ctrl_u_is_bound_in_the_comment_box(self):
+        self.assertIs(_EDITOR_KEYS["\x15"], TextBuffer.clear_line)
 
     def test_text_buffer_backspace_at_start_does_nothing(self):
         buffer = TextBuffer("x")
