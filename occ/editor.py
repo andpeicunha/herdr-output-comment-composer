@@ -67,5 +67,10 @@ class TextBuffer:
             self.col = min(self.col, len(self.lines[self.row]))
 
 
+def needs_close_confirmation(comments: dict[int, str]) -> bool:
+    """Closing loses every comment that was not sent yet, so it needs a confirmation."""
+    return any(text.strip() for text in comments.values())
+
+
 def needs_discard_confirmation(original: str, current: str) -> bool:
     return original.strip() != current.strip()

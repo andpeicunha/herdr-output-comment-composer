@@ -4,7 +4,7 @@ import unittest
 
 from unittest.mock import patch
 
-from occ.editor import TextBuffer, needs_discard_confirmation
+from occ.editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
 from occ.herdr_io import build_prompt, send_comments
 from occ.layout import (
     build_display_rows,
@@ -36,7 +36,7 @@ from occ.transcript import (
     limit_transcript_blocks,
     transcript_max_lines,
 )
-from occ.ui import _EDITOR_KEYS, selected_color_pair
+from occ.ui import _EDITOR_KEYS, Composer, selected_color_pair
 
 
 class ComposerTests(unittest.TestCase):
@@ -573,6 +573,77 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual((buffer.row, buffer.col), (0, 2))
         buffer.backspace()
         self.assertEqual(buffer.text, "acd")
+
+    def make_composer(self, blocks=("a", "b", "c", "d")):
+        composer = Composer("pane")
+        composer.lines = list(blocks)
+        composer.block_kinds = ["assistant"] * len(blocks)
+        composer.block_code = [""] * len(blocks)
+        return composer
+
+    def test_closing_needs_confirmation_only_with_unsent_comments(self):
+        self.assertFalse(needs_close_confirmation({}))
+        self.assertFalse(needs_close_confirmation({1: "   "}))
+        self.assertTrue(needs_close_confirmation({2: "fix this"}))
+
+    def test_close_without_comments_never_asks(self):
+        composer = self.make_composer()
+        with patch.object(Composer, "confirm_close") as confirm:
+            self.assertTrue(composer.request_close(None, escape=False))
+            self.assertTrue(composer.request_close(None, escape=True))
+        confirm.assert_not_called()
+
+    def test_close_with_comments_asks_and_follows_the_answer(self):
+        composer = self.make_composer()
+        composer.comments = {1: "unsent"}
+        with patch.object(Composer, "confirm_close", return_value=False) as confirm:
+            self.assertFalse(composer.request_close(None, escape=False))
+            self.assertFalse(composer.request_close(None, escape=True))
+        self.assertEqual(confirm.call_count, 2)
+        with patch.object(Composer, "confirm_close", return_value=True):
+            self.assertTrue(composer.request_close(None, escape=True))
+        self.assertEqual(composer.comments, {1: "unsent"})
+
+    def test_escape_clears_a_selection_before_it_closes(self):
+        composer = self.make_composer()
+        composer.comments = {1: "unsent"}
+        composer.toggle_selection()  # selection started on block 0
+        composer.cursor = 2
+        self.assertTrue(composer.has_selection)
+        with patch.object(Composer, "confirm_close", return_value=True) as confirm:
+            self.assertFalse(composer.request_close(None, escape=True))
+            confirm.assert_not_called()
+            self.assertFalse(composer.has_selection)
+            self.assertEqual(composer.status, "Selection cleared")
+            self.assertTrue(composer.request_close(None, escape=True))
+
+    def test_q_does_not_touch_the_selection(self):
+        composer = self.make_composer()
+        composer.toggle_selection()
+        composer.toggle_selection()  # finished range
+        self.assertTrue(composer.has_selection)
+
+        self.assertTrue(composer.request_close(None, escape=False))
+        self.assertTrue(composer.has_selection)
+
+    def test_clear_selection_reports_whether_there_was_one(self):
+        composer = self.make_composer()
+        self.assertFalse(composer.clear_selection())
+        composer.toggle_selection()
+        self.assertTrue(composer.clear_selection())
+        self.assertEqual(composer.current_selection(), (composer.cursor, composer.cursor))
+
+    def test_copy_copies_the_range_and_ends_the_selection(self):
+        composer = self.make_composer()
+        composer.cursor = 1
+        composer.toggle_selection()
+        composer.cursor = 2
+        with patch("occ.ui.copy_text_to_clipboard") as copy:
+            composer.copy_selection()
+
+        copy.assert_called_once_with("b\n\nc")
+        self.assertFalse(composer.has_selection)
+        self.assertEqual(composer.status, "Copied 2 block(s)")
 
     def test_text_buffer_clear_line_erases_only_the_current_line(self):
         buffer = TextBuffer("one\ntwo\nthree")

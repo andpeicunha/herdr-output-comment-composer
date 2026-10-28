@@ -19,7 +19,8 @@ Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app
   aligned columns (wide cells are truncated), and code fences with a
   `─ code · lang ─` marker.
 - Opens a comment box for the current block; multiline comments, `Tab` to jump
-  to the next block while typing, and a confirmation before discarding a draft.
+  to the next block while typing, a confirmation before discarding a draft, and
+  a confirmation before closing with comments you have not sent.
 - Shows a scrollbar and a `top` / `NN%` / `end` position, with page navigation
   on `Shift+↑` / `Shift+↓`.
 - Copies one or more blocks through OSC 52, keeping code lines intact.
@@ -70,10 +71,14 @@ While navigating:
 | `d` / `Page Down` | Move half a page down |
 | `g` / `G` | First / last block |
 | `c` | Open the comment box for the current block |
-| `Space` | Start or finish a multi-block selection |
+| `Space` | Start or finish a multi-block selection (the cursor block stays brighter than the selection) |
 | `y` | Copy the selected blocks through OSC 52 |
 | `s` | Send all comments to the source agent |
-| `q` / `Esc` | Close the composer |
+| `Esc` | End the selection; if there is none, close the composer |
+| `q` | Close the composer |
+
+Closing asks first when there are comments you have not sent (`y` closes, `n`,
+`Enter` or `Esc` go back). The composer closes right away when there are none.
 
 While the comment box is open:
 

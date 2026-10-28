@@ -7,7 +7,7 @@ import termios
 import time
 import traceback
 
-from .editor import TextBuffer, needs_discard_confirmation
+from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
 from .herdr_io import copy_text_to_clipboard, fetch_snapshot, send_comments
 from .layout import (
     COMMENT_PREFIX,
@@ -134,7 +134,9 @@ class Composer:
             self.draw(screen)
             key = screen.getch()
             if key in (ord("q"), 27):
-                return
+                if self.request_close(screen, escape=key == 27):
+                    return
+                continue
             if key in (curses.KEY_UP, ord("k")):
                 self.cursor = max(0, self.cursor - 1)
             elif key in (curses.KEY_DOWN, ord("j")):
@@ -164,13 +166,42 @@ class Composer:
             elif key == ord(" "):
                 self.toggle_selection()
             elif key == ord("y"):
-                start, end = self.current_selection()
-                copy_text_to_clipboard(join_blocks(self.lines, self.block_code, start, end))
-                count = end - start + 1
-                self.status = f"Copied {count} block(s)"
+                self.copy_selection()
             elif key == ord("s"):
                 if self.submit(screen):
                     return
+
+    @property
+    def has_selection(self) -> bool:
+        return self.selection_anchor is not None or self.selected_range is not None
+
+    def clear_selection(self) -> bool:
+        """Drop the selection; return True when there was one."""
+        had_selection = self.has_selection
+        self.selection_anchor = None
+        self.selected_range = None
+        if had_selection:
+            self.status = "Selection cleared"
+        return had_selection
+
+    def copy_selection(self) -> None:
+        """Copy the selected blocks (or the current one) and end the selection."""
+        start, end = self.current_selection()
+        copy_text_to_clipboard(join_blocks(self.lines, self.block_code, start, end))
+        self.selection_anchor = None
+        self.selected_range = None
+        self.status = f"Copied {end - start + 1} block(s)"
+
+    def request_close(self, screen: curses.window, escape: bool) -> bool:
+        """Return True when the composer should close.
+
+        Esc first ends a selection; closing then asks first when comments are unsent.
+        """
+        if escape and self.clear_selection():
+            return False
+        if not needs_close_confirmation(self.comments):
+            return True
+        return self.confirm_close(screen)
 
     def current_selection(self) -> tuple[int, int]:
         return selection_bounds(
@@ -198,6 +229,7 @@ class Composer:
         color_count = getattr(curses, "COLORS", 0)
         pairs = {
             "selected": selected_color_pair(color_count),
+            "cursor": (curses.COLOR_BLACK, 250 if color_count >= 256 else curses.COLOR_WHITE),
             "comment": (curses.COLOR_YELLOW, -1),
             "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
             "muted": (curses.COLOR_BLUE, -1),
@@ -336,6 +368,14 @@ class Composer:
         self, screen: curses.window, total_rows: int, available: int, top: int, inner_width: int
     ) -> None:
         position = f"block {self.cursor + 1}/{len(self.lines)}"
+        if self.has_selection:
+            start, end = self.current_selection()
+            count = end - start + 1
+            position += (
+                f" · selecting {count} block(s)"
+                if self.selection_anchor is not None
+                else f" · {count} selected (Esc clears)"
+            )
         scroll_label = scroll_position_label(total_rows, available, top)
         if scroll_label:
             position += f" · {scroll_label}"
@@ -402,7 +442,11 @@ class Composer:
             else:
                 prefix = "  "
             _rendered, markdown_kind = markdown[line_index]
-            if selected_start <= line_index <= selected_end:
+            if self.has_selection and line_index == self.cursor:
+                # The cursor stays visible: a stronger highlight than the selection's.
+                content_attr = self.style("cursor", curses.A_REVERSE) | curses.A_BOLD
+                gutter_attr = content_attr
+            elif selected_start <= line_index <= selected_end:
                 content_attr = self.style("selected", curses.A_REVERSE)
                 gutter_attr = content_attr
             else:
@@ -542,6 +586,21 @@ class Composer:
 
     def confirm_discard(self, screen: curses.window) -> bool:
         """Return True only when the user explicitly confirms discard."""
+        return self.confirm_modal(
+            screen, " Unsaved comment ", "Discard the changes to this comment?", "y: discard"
+        )
+
+    def confirm_close(self, screen: curses.window) -> bool:
+        """Return True only when the user confirms closing with unsent comments."""
+        return self.confirm_modal(
+            screen,
+            " Close without sending? ",
+            f"{len(self.comments)} unsent comment(s) will be lost.",
+            "y: close",
+        )
+
+    def confirm_modal(self, screen: curses.window, title: str, message: str, yes_label: str) -> bool:
+        """Modal where only the yes key confirms; Enter, n and Esc all go back."""
         height, width = screen.getmaxyx()
         modal_width = max(38, min(width - 4, 64))
         modal_height = 7
@@ -556,7 +615,7 @@ class Composer:
                 modal,
                 0,
                 2,
-                " Unsaved comment ",
+                title,
                 modal_width - 4,
                 self.style("error", curses.A_BOLD) | curses.A_BOLD,
             )
@@ -564,10 +623,10 @@ class Composer:
                 modal,
                 2,
                 3,
-                "Discard the changes to this comment?",
+                message,
                 modal_width - 6,
             )
-            buttons = "[ Enter / n: go back ]    [ y: discard ]"
+            buttons = f"[ Enter / n: go back ]    [ {yes_label} ]"
             _safe_addnstr(
                 modal,
                 4,
