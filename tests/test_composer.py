@@ -127,7 +127,6 @@ class ComposerTests(unittest.TestCase):
     def test_selection_uses_anchor_or_finished_range(self):
         self.assertEqual(selection_bounds(3, None, None), (3, 3))
         self.assertEqual(selection_bounds(3, 7, None), (3, 7))
-        self.assertEqual(selection_bounds(3, None, (1, 4)), (1, 4))
 
     def test_selection_uses_soft_dark_green_when_supported(self):
         self.assertEqual(selected_color_pair(256), (250, 235))
@@ -705,20 +704,18 @@ class ComposerTests(unittest.TestCase):
     def test_escape_clears_a_selection_before_it_closes(self):
         composer = self.make_composer()
         composer.comments = {1: "unsent"}
-        composer.toggle_selection()  # selection started on block 0
+        composer.extend_selection(1)  # selection started on block 0
         composer.cursor = 2
         self.assertTrue(composer.has_selection)
         with patch.object(Composer, "confirm_close", return_value=True) as confirm:
             self.assertFalse(composer.request_close(None, escape=True))
             confirm.assert_not_called()
             self.assertFalse(composer.has_selection)
-            self.assertEqual(composer.status, "Selection cleared")
             self.assertTrue(composer.request_close(None, escape=True))
 
     def test_q_does_not_touch_the_selection(self):
         composer = self.make_composer()
-        composer.toggle_selection()
-        composer.toggle_selection()  # finished range
+        composer.extend_selection(1)
         self.assertTrue(composer.has_selection)
 
         self.assertTrue(composer.request_close(None, escape=False))
@@ -727,15 +724,15 @@ class ComposerTests(unittest.TestCase):
     def test_clear_selection_reports_whether_there_was_one(self):
         composer = self.make_composer()
         self.assertFalse(composer.clear_selection())
-        composer.toggle_selection()
+        composer.extend_selection(1)
         self.assertTrue(composer.clear_selection())
         self.assertEqual(composer.current_selection(), (composer.cursor, composer.cursor))
 
     def test_copy_copies_the_range_and_ends_the_selection(self):
         composer = self.make_composer()
         composer.cursor = 1
-        composer.toggle_selection()
-        composer.cursor = 2
+        composer.extend_selection(1)
+        self.assertEqual(composer.current_selection(), (1, 2))
         with patch("occ.ui.copy_text_to_clipboard") as copy:
             composer.copy_selection()
 
@@ -832,3 +829,81 @@ class ComposerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SelectionAndRangeCommentTests(unittest.TestCase):
+    def make_composer(self):
+        composer = Composer.__new__(Composer)
+        Composer.__init__(composer, "pane-1")
+        composer.lines = ["a", "b", "c", "d"]
+        composer.block_code = [""] * 4
+        composer.cursor = 0
+        return composer
+
+    def test_shift_arrows_grow_and_shrink_the_selection(self):
+        composer = self.make_composer()
+        composer.extend_selection(1)
+        composer.extend_selection(1)
+        self.assertEqual(composer.current_selection(), (0, 2))
+        composer.extend_selection(-1)
+        self.assertEqual(composer.current_selection(), (0, 1))
+
+    def test_shift_arrow_stops_at_the_edges(self):
+        composer = self.make_composer()
+        composer.extend_selection(-1)
+        self.assertEqual(composer.cursor, 0)
+
+    def test_range_comment_is_saved_on_the_first_block_with_its_end(self):
+        composer = self.make_composer()
+        composer.cursor = 1
+        composer.span_end = 3
+        composer.editor = TextBuffer("rewrite these")
+        composer.save_editor()
+        self.assertEqual(composer.comments, {1: "rewrite these"})
+        self.assertEqual(composer.comment_spans, {1: 3})
+        self.assertEqual(
+            composer.displayed_comments(), {3: "[blocks 2–4] rewrite these"}
+        )
+
+    def test_single_block_comment_drops_an_old_span(self):
+        composer = self.make_composer()
+        composer.comments = {1: "old"}
+        composer.comment_spans = {1: 3}
+        composer.cursor = 1
+        composer.span_end = None
+        composer.editor = TextBuffer("new")
+        composer.save_editor()
+        self.assertEqual(composer.comment_spans, {})
+
+    def test_empty_save_removes_a_range_comment(self):
+        composer = self.make_composer()
+        composer.comments = {1: "old"}
+        composer.comment_spans = {1: 3}
+        composer.cursor = 1
+        composer.span_end = 3
+        composer.editor = TextBuffer("")
+        composer.save_editor()
+        self.assertEqual((composer.comments, composer.comment_spans), ({}, {}))
+
+    def test_prompt_quotes_every_block_of_the_range(self):
+        prompt = build_prompt(["a", "b", "c"], {0: "fix"}, spans={0: 2})
+        self.assertIn("Comment 1 on blocks 1-3:", prompt)
+        self.assertIn("> a\n> b\n> c", prompt)
+
+
+class KeyDecodingTests(unittest.TestCase):
+    def test_alt_arrows_in_every_form(self):
+        import curses
+
+        from occ.keys import ALT_DOWN, ALT_UP, decode_escape
+
+        self.assertEqual(decode_escape([curses.KEY_UP]), ALT_UP)
+        self.assertEqual(decode_escape([curses.KEY_DOWN]), ALT_DOWN)
+        self.assertEqual(decode_escape([ord(c) for c in "[1;3A"]), ALT_UP)
+        self.assertEqual(decode_escape([ord(c) for c in "[1;3B"]), ALT_DOWN)
+
+    def test_unknown_sequences_are_a_plain_escape(self):
+        from occ.keys import decode_escape
+
+        self.assertEqual(decode_escape([]), 27)
+        self.assertEqual(decode_escape([ord("x")]), 27)

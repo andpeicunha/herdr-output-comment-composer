@@ -11,22 +11,22 @@ COMPOSER_HELP: list[Section] = [
         "Move",
         [
             ("↑ ↓ / k j", "previous / next block"),
-            ("⇧↑ ⇧↓", "page up / down"),
-            ("u d / PgUp PgDn", "half a page up / down"),
+            ("Alt+↑ Alt+↓ / PgUp PgDn", "half a page up / down"),
+            ("u d", "half a page up / down"),
             ("g G", "first / last block"),
         ],
     ),
     (
         "Select and copy",
         [
-            ("Space", "start / finish a selection of several blocks"),
+            ("⇧↑ ⇧↓", "select several blocks while you move"),
             ("y", "copy the selection (or the block) and end the selection"),
         ],
     ),
     (
         "Comments",
         [
-            ("c", "write or edit the comment on this block"),
+            ("c", "write or edit the comment on this block (or on the whole selection)"),
             ("s", "send all comments to the agent"),
         ],
     ),

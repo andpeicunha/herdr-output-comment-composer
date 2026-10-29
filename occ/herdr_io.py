@@ -41,14 +41,24 @@ def copy_text_to_clipboard(text: str) -> None:
     os.write(1, f"\x1b]52;c;{encoded}\a".encode("ascii"))
 
 
-def build_prompt(lines: list[str], comments: dict[int, str], signature: str = "") -> str:
+def build_prompt(
+    lines: list[str],
+    comments: dict[int, str],
+    signature: str = "",
+    spans: dict[int, int] | None = None,
+) -> str:
     parts = ["Please address these comments on your previous output:"]
     for number, block_index in enumerate(sorted(comments), 1):
-        quoted = "\n".join(
-            f"> {line}".rstrip() for line in lines[block_index].splitlines() or [""]
+        last = max(block_index, (spans or {}).get(block_index, block_index))
+        text = "\n".join(lines[block_index : last + 1])
+        quoted = "\n".join(f"> {line}".rstrip() for line in text.splitlines() or [""])
+        where = (
+            f"block {block_index + 1}"
+            if last == block_index
+            else f"blocks {block_index + 1}-{last + 1}"
         )
         parts.append(
-            f"Comment {number} on block {block_index + 1}:\n\n"
+            f"Comment {number} on {where}:\n\n"
             f"{quoted}\n\n"
             f"Comment:\n{comments[block_index]}"
         )
@@ -58,10 +68,13 @@ def build_prompt(lines: list[str], comments: dict[int, str], signature: str = ""
 
 
 def send_comments(
-    source_pane: str, lines: list[str], comments: dict[int, str]
+    source_pane: str,
+    lines: list[str],
+    comments: dict[int, str],
+    spans: dict[int, int] | None = None,
 ) -> tuple[bool, str]:
     herdr = os.environ.get("HERDR_BIN_PATH", "herdr")
-    prompt = build_prompt(lines, comments, setting("OCC_SIGNATURE").strip())
+    prompt = build_prompt(lines, comments, setting("OCC_SIGNATURE").strip(), spans)
     result = subprocess.run(
         [herdr, "agent", "prompt", source_pane, prompt],
         stdout=subprocess.DEVNULL,

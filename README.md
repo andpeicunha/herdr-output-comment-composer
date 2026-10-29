@@ -23,7 +23,7 @@ Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app
   to the next block while typing, a confirmation before discarding a draft, and
   a confirmation before closing with comments you have not sent.
 - Shows a scrollbar and a `top` / `NN%` / `end` position, with page navigation
-  on `Shift+↑` / `Shift+↓`.
+  on `Alt+↑` / `Alt+↓` (half a page).
 - Copies one or more blocks through OSC 52, keeping code lines intact.
 - Sends all comments to the source agent as one structured prompt.
 - Uses Python's built-in `curses`; no Python package installation is needed.
@@ -67,12 +67,10 @@ While navigating:
 | --- | --- |
 | `↑` / `k` | Previous block |
 | `↓` / `j` | Next block |
-| `Shift+↑` / `Shift+↓` | Move a full page up / down |
-| `u` / `Page Up` | Move half a page up |
-| `d` / `Page Down` | Move half a page down |
+| `Alt+↑` / `Alt+↓` | Move half a page up / down (also `u` / `d`, `Page Up` / `Page Down`) |
 | `g` / `G` | First / last block |
-| `c` | Open the comment box for the current block |
-| `Space` | Start or finish a multi-block selection (the cursor block stays brighter than the selection) |
+| `Shift+↑` / `Shift+↓` | Select blocks while you move (the cursor block stays brighter); a plain move ends the selection |
+| `c` | Open the comment box for the current block, or for the whole selection (one comment on several blocks) |
 | `y` | Copy the selected blocks through OSC 52 |
 | `s` | Send all comments to the source agent |
 | `Esc` | End the selection; if there is none, close the composer |

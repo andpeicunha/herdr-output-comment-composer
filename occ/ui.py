@@ -8,6 +8,7 @@ import time
 import traceback
 
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
+from .keys import ALT_DOWN, ALT_UP, read_key
 from .help import COMPOSER_HELP, clamp_scroll, help_layout
 from .herdr_io import copy_text_to_clipboard, fetch_snapshot, send_comments
 from .layout import (
@@ -95,7 +96,8 @@ class Composer:
         self.cursor = 0
         self.comments: dict[int, str] = {}
         self.selection_anchor: int | None = None
-        self.selected_range: tuple[int, int] | None = None
+        self.comment_spans: dict[int, int] = {}
+        self.span_end: int | None = None
         self.status = ""
         self.sent = False
         self.colors: dict[str, int] = {}
@@ -134,29 +136,31 @@ class Composer:
         )
         while True:
             self.draw(screen)
-            key = screen.getch()
+            key = read_key(screen)
             if key in (ord("q"), 27):
                 if self.request_close(screen, escape=key == 27):
                     return
                 continue
-            if key in (curses.KEY_UP, ord("k")):
+            if key in (curses.KEY_SR, curses.KEY_SF):
+                self.extend_selection(-1 if key == curses.KEY_SR else 1)
+            elif key in (curses.KEY_UP, ord("k")):
+                self.clear_selection()
                 self.cursor = max(0, self.cursor - 1)
             elif key in (curses.KEY_DOWN, ord("j")):
+                self.clear_selection()
                 self.cursor = min(len(self.lines) - 1, self.cursor + 1)
             elif key in (
-                curses.KEY_SR,
-                curses.KEY_SF,
+                ALT_UP,
+                ALT_DOWN,
                 curses.KEY_PPAGE,
                 curses.KEY_NPAGE,
                 ord("u"),
                 ord("d"),
             ):
-                # Shift+arrows page a full screen; u/d and PgUp/PgDn half a screen.
-                if key in (curses.KEY_SR, curses.KEY_SF):
-                    page = max(1, self.visible_rows - 2)
-                else:
-                    page = max(1, self.visible_rows // 2)
-                if key in (curses.KEY_SR, curses.KEY_PPAGE, ord("u")):
+                # Alt+arrows, PgUp/PgDn and u/d move half a screen.
+                self.clear_selection()
+                page = max(1, self.visible_rows // 2)
+                if key in (ALT_UP, curses.KEY_PPAGE, ord("u")):
                     page = -page
                 self.cursor = page_target(self.display_rows, self.cursor, page)
             elif key == ord("g"):
@@ -165,8 +169,6 @@ class Composer:
                 self.cursor = len(self.lines) - 1
             elif key == ord("c"):
                 self.edit_comment(screen)
-            elif key == ord(" "):
-                self.toggle_selection()
             elif key == ord("y"):
                 self.copy_selection()
             elif key == ord("?"):
@@ -177,15 +179,12 @@ class Composer:
 
     @property
     def has_selection(self) -> bool:
-        return self.selection_anchor is not None or self.selected_range is not None
+        return self.selection_anchor is not None
 
     def clear_selection(self) -> bool:
         """Drop the selection; return True when there was one."""
         had_selection = self.has_selection
         self.selection_anchor = None
-        self.selected_range = None
-        if had_selection:
-            self.status = "Selection cleared"
         return had_selection
 
     def copy_selection(self) -> None:
@@ -193,7 +192,6 @@ class Composer:
         start, end = self.current_selection()
         copy_text_to_clipboard(join_blocks(self.lines, self.block_code, start, end))
         self.selection_anchor = None
-        self.selected_range = None
         self.status = f"Copied {end - start + 1} block(s)"
 
     def request_close(self, screen: curses.window, escape: bool) -> bool:
@@ -208,22 +206,15 @@ class Composer:
         return self.confirm_close(screen)
 
     def current_selection(self) -> tuple[int, int]:
-        return selection_bounds(
-            self.cursor, self.selection_anchor, self.selected_range
-        )
+        return selection_bounds(self.cursor, self.selection_anchor, None)
 
-    def toggle_selection(self) -> None:
-        if self.selection_anchor is not None:
-            self.selected_range = tuple(sorted((self.selection_anchor, self.cursor)))
-            self.selection_anchor = None
-            start, end = self.selected_range
-            self.status = f"Selected blocks {start + 1}–{end + 1}"
-        elif self.selected_range is not None:
-            self.selected_range = None
-            self.status = "Selection cleared"
-        else:
+    def extend_selection(self, step: int) -> None:
+        """Shift+arrow: start a selection on this block, then grow it with the cursor."""
+        if self.selection_anchor is None:
             self.selection_anchor = self.cursor
-            self.status = "Selection started · move and press Space again"
+        self.cursor = min(max(0, self.cursor + step), len(self.lines) - 1)
+        start, end = self.current_selection()
+        self.status = f"Selected {end - start + 1} block(s) · c comment · y copy · Esc clears"
 
     def setup_colors(self) -> None:
         if not curses.has_colors():
@@ -356,7 +347,7 @@ class Composer:
         }
         rows = build_display_rows(
             rendered_blocks,
-            self.comments,
+            self.displayed_comments(),
             width=content_width,
             spacing=True,
             compact_after=compact_after,
@@ -376,11 +367,7 @@ class Composer:
         if self.has_selection:
             start, end = self.current_selection()
             count = end - start + 1
-            position += (
-                f" · selecting {count} block(s)"
-                if self.selection_anchor is not None
-                else f" · {count} selected (Esc clears)"
-            )
+            position += f" · {count} selected (Esc clears)"
         scroll_label = scroll_position_label(total_rows, available, top)
         if scroll_label:
             position += f" · {scroll_label}"
@@ -485,7 +472,7 @@ class Composer:
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
         _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
-        footer = " ↑/↓ move · Space select · y copy · c comment · s send · q close · ? help "
+        footer = " ↑/↓ move · ⇧↑/↓ select · c comment · s send · q close · ? help "
         _safe_addnstr(
             screen,
             inner_bottom,
@@ -539,9 +526,21 @@ class Composer:
         except curses.error:
             pass
 
+    def displayed_comments(self) -> dict[int, str]:
+        """Comments by the block they are drawn under (a range comment sits under its last block)."""
+        shown: dict[int, str] = {}
+        for start, text in sorted(self.comments.items()):
+            end = self.comment_spans.get(start)
+            if end is not None and end > start:
+                shown[end] = f"[blocks {start + 1}–{end + 1}] {text}"
+            else:
+                shown.setdefault(start, text)
+        return shown
+
     def open_editor(self) -> str:
         """Start typing on the current block; return its saved comment."""
         original = self.comments.get(self.cursor, "")
+        self.span_end = self.comment_spans.get(self.cursor)
         self.editor = TextBuffer(original)
         self.edit_top = 0
         return original
@@ -550,12 +549,25 @@ class Composer:
         text = self.editor.text.strip() if self.editor else ""
         if text:
             self.comments[self.cursor] = text
-            self.status = f"Comment saved on block {self.cursor + 1}"
+            end = self.span_end
+            if end is not None and end > self.cursor:
+                self.comment_spans[self.cursor] = end
+                self.status = f"Comment saved on blocks {self.cursor + 1}–{end + 1}"
+            else:
+                self.comment_spans.pop(self.cursor, None)
+                self.status = f"Comment saved on block {self.cursor + 1}"
         elif self.comments.pop(self.cursor, None) is not None:
+            self.comment_spans.pop(self.cursor, None)
             self.status = f"Comment removed from block {self.cursor + 1}"
 
     def edit_comment(self, screen: curses.window) -> None:
+        selection = self.current_selection() if self.has_selection else None
+        if selection:
+            self.cursor = selection[0]
         original = self.open_editor()
+        if selection:
+            self.span_end = selection[1]
+        self.selection_anchor = None
         curses.curs_set(1)
         try:
             while True:
@@ -712,7 +724,7 @@ class Composer:
         self.status = f"Sending {len(self.comments)} comment(s)…"
         self.draw(screen)
         success, error = send_comments(
-            self.source_pane, self.lines, self.comments
+            self.source_pane, self.lines, self.comments, self.comment_spans
         )
         if not success:
             self.status = f"Error: {error[:120]}"
