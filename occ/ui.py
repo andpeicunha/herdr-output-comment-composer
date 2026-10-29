@@ -23,6 +23,7 @@ from .layout import (
 from .markdown import (
     bold_segments,
     comment_preview,
+    continues_run,
     expand_transcript_blocks,
     format_markdown_lines,
     join_blocks,
@@ -242,6 +243,7 @@ class Composer:
             "rule": (curses.COLOR_BLUE, -1),
             "bullet": (curses.COLOR_WHITE, -1),
             "table": (curses.COLOR_WHITE, -1),
+            "record": (curses.COLOR_WHITE, -1),
             "marker": (curses.COLOR_GREEN, -1),
             "prompt": (curses.COLOR_WHITE, -1),
             "tool": (245 if color_count >= 256 else curses.COLOR_BLUE, -1),
@@ -347,7 +349,7 @@ class Composer:
                 and markdown[index + 1][1] == "bullet"
                 and not self.block_starts[index + 1]
             )
-            or self.block_code[index + 1] == "code"
+            or continues_run(self.block_code[index], self.block_code[index + 1])
         }
         rows = build_display_rows(
             rendered_blocks,
@@ -358,7 +360,7 @@ class Composer:
             no_wrap={
                 index
                 for index, (_text, kind) in enumerate(markdown)
-                if kind == "table" and self.block_kinds[index] == "assistant"
+                if kind in ("table", "record") and self.block_kinds[index] == "assistant"
             },
             preserve_space={index for index, (_text, kind) in enumerate(markdown) if kind == "code"},
         )

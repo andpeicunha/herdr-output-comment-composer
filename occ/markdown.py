@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 
 
 _BLOCK_START_RE = re.compile(r"^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>|```|~~~|[❯●]\s)")
@@ -14,6 +15,9 @@ _RULE_RE = re.compile(r"^(?:-[ \t]*){3,}$|^(?:\*[ \t]*){3,}$|^(?:_[ \t]*){3,}$")
 _TABLE_ROW_PREFIXES = ("|", "│", "┌", "├", "└", "┏", "┣", "┗", "╭", "╰")
 
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+# A border line of a table drawn with box characters (no text).
+_BOX_BORDER_RE = re.compile(r"^[\s─━═┌┐└┘├┤┬┴┼╭╮╰╯┏┓┗┛┣┫┳┻╋┃│║]+$")
+_CODE_ROLES = ("fence", "code", "code_gap")
 
 # Invisible markers around bold spans in rendered text; drawn with A_BOLD.
 BOLD_ON = "\x01"
@@ -87,16 +91,23 @@ def group_logical_blocks(lines: list[str]) -> list[str]:
 
 
 def split_code_fences(blocks: list[str]) -> list[tuple[str, str]]:
-    """Split fenced code blocks into one selectable block per code line.
+    """Split fenced code and tables into one selectable block per code line or table row.
 
-    Returns (text, code role) pairs. The role is "" for normal blocks, "fence" for the
-    opening fence line, "code" for a line that directly follows the previous one, and
-    "code_gap" for a line that follows one or more blank lines.
+    Returns (text, role) pairs. The role is "" for normal blocks, "fence" for the opening
+    fence line, "code" for a line that directly follows the previous one, "code_gap" for
+    a line that follows one or more blank lines, "thead" and "trow" for the header (with
+    its separator line) and the rows of a Markdown table, and "tline" for the lines of a
+    table drawn with box characters.
     """
     expanded: list[tuple[str, str]] = []
     for block in blocks:
         if not block.lstrip().startswith(("```", "~~~")):
-            expanded.append((block, ""))
+            if is_markdown_table(block):
+                expanded.extend(split_pipe_table(block))
+            elif block.lstrip().startswith(_TABLE_ROW_PREFIXES[1:]):
+                expanded.extend(split_box_table(block))
+            else:
+                expanded.append((block, ""))
             continue
         opening, *body = block.split("\n")
         if body and body[-1].strip().startswith(("```", "~~~")):
@@ -110,6 +121,41 @@ def split_code_fences(blocks: list[str]) -> list[tuple[str, str]]:
             expanded.append((line.rstrip(), "code_gap" if gap else "code"))
             gap = False
     return expanded
+
+
+def split_pipe_table(block: str) -> list[tuple[str, str]]:
+    """One block per row of a Markdown table; the separator line stays with the header."""
+    groups: list[list[str]] = []
+    for row in (line.strip() for line in block.split("\n")):
+        cells = _split_cells(row)
+        if groups and all(_TABLE_SEPARATOR_CELL_RE.match(cell) for cell in cells):
+            groups[-1].append(row)
+        else:
+            groups.append([row])
+    return [("\n".join(rows), "thead" if index == 0 else "trow") for index, rows in enumerate(groups)]
+
+
+def split_box_table(block: str) -> list[tuple[str, str]]:
+    """One block per content line of a table drawn with box characters.
+
+    Border lines (``┌───┐``, ``├───┤``) stay with the content line next to them.
+    """
+    groups: list[list[str]] = []
+    pending: list[str] = []
+    for line in block.split("\n"):
+        if _BOX_BORDER_RE.match(line):
+            (groups[-1] if groups else pending).append(line)
+        else:
+            groups.append(pending + [line])
+            pending = []
+    if pending:
+        groups.append(pending)
+    return [("\n".join(lines), "tline") for lines in groups]
+
+
+def continues_run(previous_role: str, role: str) -> bool:
+    """True when a block continues the previous one (code lines, table rows) with no gap."""
+    return role in ("code", "trow") or (role == "tline" and previous_role == "tline")
 
 
 def split_markdown_blocks(text: str) -> list[tuple[str, str]]:
@@ -143,10 +189,10 @@ def expand_transcript_blocks(
 
 
 def join_blocks(lines: list[str], code: list[str], start: int, end: int) -> str:
-    """Join a selected range for copying; consecutive code lines keep single newlines."""
+    """Join a selected range for copying; code lines and table rows keep single newlines."""
     text = lines[start]
     for index in range(start + 1, end + 1):
-        text += ("\n" if code[index] == "code" else "\n\n") + lines[index]
+        text += ("\n" if continues_run(code[index - 1], code[index]) else "\n\n") + lines[index]
     return text
 
 
@@ -218,15 +264,25 @@ def is_markdown_table(block: str) -> bool:
     return bool(rows) and all(row.strip().startswith("|") for row in rows)
 
 
-def render_markdown_table(block: str, width: int = 0) -> str:
-    """Align pipe-table columns, truncating the widest ones to fit ``width``."""
+def _split_cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip().strip("|").split("|")]
+
+
+def _table_rows(block: str, convert) -> list[list[str] | None]:
+    """Cells of every line (None for a separator line), each cell passed through ``convert``."""
     rows: list[list[str] | None] = []
     for raw in block.splitlines():
-        cells = [cell.strip() for cell in raw.strip().strip("|").split("|")]
+        cells = _split_cells(raw)
         if all(_TABLE_SEPARATOR_CELL_RE.match(cell) for cell in cells):
             rows.append(None)
         else:
-            rows.append([_strip_inline_markup(cell) for cell in cells])
+            rows.append([convert(cell) for cell in cells])
+    return rows
+
+
+def render_markdown_table(block: str, width: int = 0) -> str:
+    """Align pipe-table columns, truncating the widest ones to fit ``width``."""
+    rows = _table_rows(block, _strip_inline_markup)
     data = [row for row in rows if row is not None]
     if not data:
         return block
@@ -254,6 +310,90 @@ def render_markdown_table(block: str, width: int = 0) -> str:
     return "\n".join(rendered)
 
 
+def _wrap_field(name: str, value: str, width: int) -> list[str]:
+    """``Name: value`` wrapped to ``width``, continuation lines indented under the value."""
+    label = f"{name}: "
+    indent = " " * min(len(label), max(0, width // 2))
+    lines = textwrap.wrap(
+        label + value,
+        width=max(1, width),
+        subsequent_indent=indent,
+        replace_whitespace=False,
+        break_long_words=True,
+    ) or [label.rstrip()]
+    if lines[0].startswith(f"{name}:"):
+        lines[0] = f"{BOLD_ON}{name}:{BOLD_OFF}" + lines[0][len(name) + 1 :]
+    return lines
+
+
+def layout_table_blocks(blocks: list[str], width: int = 0) -> list[tuple[str, str]]:
+    """Display text for the row blocks of one pipe table (header block first).
+
+    The table shows with aligned columns when they fit ``width`` without cutting a cell.
+    Otherwise each row becomes a record (``Name: value`` lines with the full text), like
+    agent UIs do for a table that is too wide.
+    """
+    table = "\n".join(blocks)
+    plain = [row for row in _table_rows(table, _strip_inline_markup) if row is not None]
+    if not plain:
+        return [(block, "table") for block in blocks]
+    columns = max(len(row) for row in plain)
+    natural = (
+        sum(max((len(row[c]) for row in plain if c < len(row)), default=0) for c in range(columns))
+        + 3 * (columns - 1)
+    )
+    if width <= 0 or natural <= width:
+        rendered = render_markdown_table(table, width).split("\n")
+        result: list[tuple[str, str]] = []
+        position = 0
+        for block in blocks:
+            count = len(block.split("\n"))
+            result.append(("\n".join(rendered[position : position + count]), "table"))
+            position += count
+        return result
+    rich = [row for row in _table_rows(table, mark_inline_markup) if row is not None]
+    names = [
+        name or f"Column {number + 1}"
+        for number, name in enumerate(plain[0] + [""] * (columns - len(plain[0])))
+    ]
+    columns_line = textwrap.wrap(
+        "Columns: " + " · ".join(names),
+        width=max(1, width),
+        subsequent_indent=" " * min(9, max(0, width // 2)),
+    )
+    result = [("\n".join(columns_line), "record")]
+    rule = "─" * min(width, 40)
+    for row in rich[1:]:
+        lines = [rule]
+        for name, value in zip(names, row):
+            if value:
+                lines.extend(_wrap_field(name, value, width))
+        result.append(("\n".join(lines), "record"))
+    return result
+
+
+def _layout_table_groups(
+    lines: list[str], code: list[str], width: int
+) -> dict[int, tuple[str, str]]:
+    """Display text for every table block, laying out each table as a whole."""
+    display: dict[int, tuple[str, str]] = {}
+    index = 0
+    while index < len(lines):
+        role = code[index]
+        if role == "thead":
+            end = index + 1
+            while end < len(lines) and code[end] == "trow":
+                end += 1
+            for position, shown in zip(range(index, end), layout_table_blocks(lines[index:end], width)):
+                display[position] = shown
+            index = end
+            continue
+        if role == "tline":
+            display[index] = (lines[index], "table")
+        index += 1
+    return display
+
+
 def format_markdown_lines(
     lines: list[str], width: int = 0, code: list[str] | None = None
 ) -> list[tuple[str, str]]:
@@ -265,6 +405,7 @@ def format_markdown_lines(
     formatted: list[tuple[str, str]] = []
     in_code = False
     indent_stack: list[int] = []
+    tables = _layout_table_groups(lines, code, width) if code else {}
 
     def list_level(item: str) -> int:
         """Nesting level of a list item from its indentation (any step size)."""
@@ -281,12 +422,15 @@ def format_markdown_lines(
         role = code[index] if code else ""
         if role or not _LIST_ITEM_RE.match(stripped):
             indent_stack.clear()
+        if index in tables:
+            formatted.append(tables[index])
+            continue
         if role == "fence":
             language = stripped.lstrip("`~").strip()
             label = f"─ code · {language} " if language else "─ code "
             formatted.append((label + "─" * 8, "code"))
             continue
-        if role:
+        if role in _CODE_ROLES:
             formatted.append(("  " + line, "code"))
             continue
         if not in_code and is_markdown_table(line):

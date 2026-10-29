@@ -21,8 +21,10 @@ from occ.markdown import (
     BOLD_ON,
     bold_segments,
     comment_preview,
+    continues_run,
     expand_transcript_blocks,
     format_markdown_lines,
+    layout_table_blocks,
     group_logical_blocks,
     join_blocks,
     mark_inline_markup,
@@ -261,7 +263,7 @@ class ComposerTests(unittest.TestCase):
             ["line", "comment", "comment_continuation", "comment_continuation"],
         )
 
-    def test_markdown_table_rows_stay_in_one_block(self):
+    def test_markdown_table_rows_become_one_block_each(self):
         blocks = split_markdown_blocks(
             "Intro.\n\n| Name | Value |\n|---|---|\n| alpha | 1 |\nAfter."
         )
@@ -270,7 +272,8 @@ class ComposerTests(unittest.TestCase):
             blocks,
             [
                 ("Intro.", ""),
-                ("| Name | Value |\n|---|---|\n| alpha | 1 |", ""),
+                ("| Name | Value |\n|---|---|", "thead"),
+                ("| alpha | 1 |", "trow"),
                 ("After.", ""),
             ],
         )
@@ -380,6 +383,101 @@ class ComposerTests(unittest.TestCase):
         )
 
         self.assertTrue(rows[0][2].startswith("    indented"))
+
+    ROWS = [
+        "| Key | Note |\n|---|---|",
+        "| a | one two three four five six seven |",
+        "| b | short |",
+    ]
+
+    def test_header_block_keeps_its_separator_line(self):
+        self.assertEqual(
+            split_markdown_blocks("| A | B |\n|:--|--:|\n| 1 | 2 |\n| 3 | 4 |"),
+            [("| A | B |\n|:--|--:|", "thead"), ("| 1 | 2 |", "trow"), ("| 3 | 4 |", "trow")],
+        )
+
+    def test_box_drawn_table_gets_one_block_per_content_line(self):
+        blocks = split_markdown_blocks("┌───┬───┐\n│ a │ b │\n├───┼───┤\n│ c │ d │\n└───┴───┘")
+
+        self.assertEqual(
+            blocks,
+            [
+                ("┌───┬───┐\n│ a │ b │\n├───┼───┤", "tline"),
+                ("│ c │ d │\n└───┴───┘", "tline"),
+            ],
+        )
+
+    def test_table_that_fits_keeps_aligned_columns(self):
+        shown = layout_table_blocks(self.ROWS, 80)
+
+        self.assertEqual([kind for _text, kind in shown], ["table", "table", "table"])
+        self.assertEqual(
+            "\n".join(text for text, _kind in shown), render_markdown_table("\n".join(self.ROWS), 80)
+        )
+        self.assertEqual(len(shown[0][0].splitlines()), 2)  # header + separator line
+        self.assertEqual({kind for _text, kind in layout_table_blocks(self.ROWS, 0)}, {"table"})
+
+    def test_table_that_does_not_fit_becomes_records_with_the_full_text(self):
+        rule = "─" * 30
+
+        self.assertEqual(
+            layout_table_blocks(self.ROWS, 30),
+            [
+                ("Columns: Key · Note", "record"),
+                (
+                    f"{rule}\n{BOLD_ON}Key:{BOLD_OFF} a\n"
+                    f"{BOLD_ON}Note:{BOLD_OFF} one two three four five\n      six seven",
+                    "record",
+                ),
+                (f"{rule}\n{BOLD_ON}Key:{BOLD_OFF} b\n{BOLD_ON}Note:{BOLD_OFF} short", "record"),
+            ],
+        )
+
+    def test_table_switches_to_records_one_column_below_its_natural_width(self):
+        self.assertEqual({kind for _text, kind in layout_table_blocks(self.ROWS, 39)}, {"table"})
+        self.assertEqual({kind for _text, kind in layout_table_blocks(self.ROWS, 38)}, {"record"})
+
+    def test_records_keep_bold_and_skip_empty_cells(self):
+        blocks = ["| Name | Detail |\n|---|---|", "| **x** | `code` and **bold** |", "| y |  |"]
+        shown = layout_table_blocks(blocks, 15)
+
+        self.assertEqual({kind for _text, kind in shown}, {"record"})
+        self.assertIn(f"{BOLD_ON}Name:{BOLD_OFF} {BOLD_ON}x{BOLD_OFF}", shown[1][0])
+        self.assertEqual(shown[2][0], f"{'─' * 15}\n{BOLD_ON}Name:{BOLD_OFF} y")
+        self.assertTrue(all(len(line) <= 15 + 2 for text, _kind in shown for line in text.splitlines()))
+
+    def test_single_row_table_is_still_shown(self):
+        self.assertEqual(layout_table_blocks(["| A | B |"], 80), [("A │ B", "table")])
+
+    def test_format_lays_out_a_whole_table_from_the_block_roles(self):
+        pairs = split_markdown_blocks(
+            "Intro.\n\n| Key | Note |\n|---|---|\n| a | one two three four five six seven |\n\nAfter."
+        )
+        shown = format_markdown_lines([text for text, _role in pairs], 30, [role for _text, role in pairs])
+
+        self.assertEqual(
+            [kind for _text, kind in shown], ["normal", "record", "record", "normal"]
+        )
+
+    def test_copying_table_rows_keeps_valid_markdown(self):
+        lines = ["Intro.", "| A | B |\n|---|---|", "| 1 | 2 |", "| 3 | 4 |"]
+        roles = ["", "thead", "trow", "trow"]
+
+        self.assertEqual(join_blocks(lines, roles, 1, 3), "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |")
+        self.assertEqual(join_blocks(lines, roles, 0, 2), "Intro.\n\n| A | B |\n|---|---|\n| 1 | 2 |")
+        self.assertEqual(join_blocks(["x", "l1", "l2"], ["", "tline", "tline"], 0, 2), "x\n\nl1\nl2")
+
+    def test_table_rows_and_code_lines_run_together_but_paragraphs_do_not(self):
+        self.assertTrue(continues_run("thead", "trow"))
+        self.assertTrue(continues_run("trow", "trow"))
+        self.assertTrue(continues_run("tline", "tline"))
+        self.assertTrue(continues_run("fence", "code"))
+        self.assertFalse(continues_run("", "thead"))
+        self.assertFalse(continues_run("", "tline"))
+        self.assertFalse(continues_run("code", "code_gap"))
+
+    def test_comment_preview_of_a_row_shows_its_cells(self):
+        self.assertTrue(comment_preview("| 2 | The oven is missing. | Add 180 °C |").startswith("2 · The oven"))
 
     def test_horizontal_rule_is_its_own_block_and_drawn_as_a_line(self):
         blocks = group_logical_blocks(["Text before", "", "---", "", "Text after"])

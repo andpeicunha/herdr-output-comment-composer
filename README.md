@@ -13,11 +13,12 @@ Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app
 - Reads up to 500 recent lines from Codex or Claude Code JSONL transcripts;
   falls back to `herdr pane read` for other agents.
 - Splits output into selectable blocks: prompts, paragraphs, list items,
-  headings, quotes, tables, tool calls, and every line of a code fence, so you
-  can comment on a single line of code.
-- Renders Markdown the way the agent UIs do: `**bold**` as bold, tables with
-  aligned columns (wide cells are truncated), and code fences with a
-  `─ code · lang ─` marker.
+  headings, quotes, tool calls, every row of a table, and every line of a code
+  fence, so you can comment on a single table row or a single line of code.
+- Renders Markdown the way the agent UIs do: `**bold**` as bold, code fences with
+  a `─ code · lang ─` marker, and tables with aligned columns. A table that does
+  not fit the pane shows as one record per row (`Name: value` lines with the full
+  text, no cut cells), like the agent UIs do.
 - Opens a comment box for the current block; multiline comments, `Tab` to jump
   to the next block while typing, a confirmation before discarding a draft, and
   a confirmation before closing with comments you have not sent.
