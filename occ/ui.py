@@ -8,6 +8,7 @@ import time
 import traceback
 
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
+from .help import COMPOSER_HELP, clamp_scroll, help_layout
 from .herdr_io import copy_text_to_clipboard, fetch_snapshot, send_comments
 from .layout import (
     COMMENT_PREFIX,
@@ -168,6 +169,8 @@ class Composer:
                 self.toggle_selection()
             elif key == ord("y"):
                 self.copy_selection()
+            elif key == ord("?"):
+                self.show_help(screen)
             elif key == ord("s"):
                 if self.submit(screen):
                     return
@@ -482,7 +485,7 @@ class Composer:
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
         _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
-        footer = " ↑/↓ move · ⇧↑/↓ page · Space select · y copy · c comment · s send · q close "
+        footer = " ↑/↓ move · Space select · y copy · c comment · s send · q close · ? help "
         _safe_addnstr(
             screen,
             inner_bottom,
@@ -585,6 +588,55 @@ class Composer:
         finally:
             self.editor = None
             curses.curs_set(0)
+
+    def show_help(self, screen: curses.window) -> None:
+        """Modal listing every shortcut; it scrolls when the pane is short."""
+        height, width = screen.getmaxyx()
+        modal_width = max(30, min(width - 2, 72))
+        rows, indent = help_layout(COMPOSER_HELP, modal_width - 4)
+        visible = max(1, min(len(rows), height - 4))
+        modal_height = visible + 2
+        modal = curses.newwin(
+            modal_height, modal_width, max(0, (height - modal_height) // 2), max(0, (width - modal_width) // 2)
+        )
+        modal.keypad(True)
+        border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
+        offset = 0
+        while True:
+            modal.erase()
+            _draw_heavy_box(modal, border_attr)
+            _safe_addnstr(
+                modal, 0, 2, " Shortcuts ", modal_width - 4,
+                self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
+            )
+            compact = modal_width < 44
+            hint = " ? close " if compact else " ? / Esc / q close "
+            if len(rows) > visible:
+                span = f"{offset + 1}-{offset + visible}"
+                hint += (
+                    f"· ↑/↓ {span}/{len(rows)} "
+                    if compact
+                    else f"· ↑/↓ scroll ({span} of {len(rows)}) "
+                )
+            _safe_addnstr(modal, modal_height - 1, 2, hint, modal_width - 4, self.style("muted"))
+            for y, (kind, keys, text) in enumerate(rows[offset : offset + visible], 1):
+                if kind == "section":
+                    _safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("heading", curses.A_BOLD) | curses.A_BOLD)
+                elif kind == "key":
+                    _safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("comment", curses.A_BOLD) | curses.A_BOLD)
+                    _safe_addnstr(modal, y, 2 + indent, text, modal_width - 4 - indent)
+            modal.refresh()
+            key = modal.get_wch()
+            if key in ("?", "\x1b", "q", "\n", "\r", curses.KEY_ENTER):
+                return
+            if key in (curses.KEY_UP, "k"):
+                offset = clamp_scroll(offset - 1, len(rows), visible)
+            elif key in (curses.KEY_DOWN, "j"):
+                offset = clamp_scroll(offset + 1, len(rows), visible)
+            elif key == curses.KEY_PPAGE:
+                offset = clamp_scroll(offset - visible, len(rows), visible)
+            elif key == curses.KEY_NPAGE:
+                offset = clamp_scroll(offset + visible, len(rows), visible)
 
     def confirm_discard(self, screen: curses.window) -> bool:
         """Return True only when the user explicitly confirms discard."""

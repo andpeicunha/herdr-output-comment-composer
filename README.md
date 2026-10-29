@@ -76,6 +76,7 @@ While navigating:
 | `y` | Copy the selected blocks through OSC 52 |
 | `s` | Send all comments to the source agent |
 | `Esc` | End the selection; if there is none, close the composer |
+| `?` | Show all the shortcuts in a window (`Esc`, `?` or `q` closes it) |
 | `q` | Close the composer |
 
 Closing asks first when there are comments you have not sent (`y` closes, `n`,
