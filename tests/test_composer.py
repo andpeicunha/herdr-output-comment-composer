@@ -907,3 +907,32 @@ class KeyDecodingTests(unittest.TestCase):
 
         self.assertEqual(decode_escape([]), 27)
         self.assertEqual(decode_escape([ord("x")]), 27)
+
+
+class CodeStyleTests(unittest.TestCase):
+    def test_trailing_comment_is_split_from_the_code(self):
+        from occ.markdown import split_code_comment
+
+        self.assertEqual(
+            split_code_comment("  const a = 1;   // already checked"),
+            ("  const a = 1;   ", "// already checked"),
+        )
+
+    def test_urls_and_hashes_inside_words_are_not_comments(self):
+        from occ.markdown import split_code_comment
+
+        self.assertEqual(split_code_comment("fetch('https://host/x')"), ("fetch('https://host/x')", ""))
+        self.assertEqual(split_code_comment("a#b = 1"), ("a#b = 1", ""))
+
+    def test_whole_line_comments_and_hash_comments(self):
+        from occ.markdown import split_code_comment
+
+        self.assertEqual(split_code_comment("  // note"), ("  ", "// note"))
+        self.assertEqual(split_code_comment("x = 1  # why"), ("x = 1  ", "# why"))
+
+    def test_code_frame_line_is_recognised(self):
+        from occ.markdown import is_code_frame
+
+        self.assertTrue(is_code_frame("— code · ts ────────"))
+        self.assertTrue(is_code_frame("─ code ────────"))
+        self.assertFalse(is_code_frame("  const a = 1;"))

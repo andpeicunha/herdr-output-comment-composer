@@ -18,6 +18,7 @@ _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
 # A border line of a table drawn with box characters (no text).
 _BOX_BORDER_RE = re.compile(r"^[\s─━═┌┐└┘├┤┬┴┼╭╮╰╯┏┓┗┛┣┫┳┻╋┃│║]+$")
 _CODE_ROLES = ("fence", "code", "code_gap")
+_CODE_COMMENT_RE = re.compile(r"(^|\s)(//|#(?=\s|$))")
 
 # Invisible markers around bold spans in rendered text; drawn with A_BOLD.
 BOLD_ON = "\x01"
@@ -492,3 +493,21 @@ def comment_preview(block: str, limit: int = 40) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def is_code_frame(text: str) -> bool:
+    """True for the rule line that opens a code block ("─ code · ts ────")."""
+    return text.lstrip().startswith(("─", "— code"))
+
+
+def split_code_comment(text: str) -> tuple[str, str]:
+    """Split a code line into (code, trailing comment) at a `//` or `#` comment marker.
+
+    A marker only counts at the start of the line or after whitespace, so URLs such as
+    "https://host" and "a#b" stay whole.
+    """
+    match = _CODE_COMMENT_RE.search(text)
+    if not match:
+        return text, ""
+    cut = match.start(2)
+    return text[:cut], text[cut:]

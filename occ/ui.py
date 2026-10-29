@@ -28,8 +28,10 @@ from .markdown import (
     continues_run,
     expand_transcript_blocks,
     format_markdown_lines,
+    is_code_frame,
     join_blocks,
     mark_inline_markup,
+    split_code_comment,
     split_code_fences,
 )
 from .transcript import fetch_transcript, load_meta
@@ -232,7 +234,9 @@ class Composer:
             "success": (curses.COLOR_GREEN, -1),
             "error": (curses.COLOR_RED, -1),
             "heading": (curses.COLOR_CYAN, -1),
-            "code": (curses.COLOR_GREEN, -1),
+            "code": (252, 236) if color_count >= 256 else (curses.COLOR_WHITE, curses.COLOR_BLACK),
+            "code_comment": (245, 236) if color_count >= 256 else (curses.COLOR_CYAN, curses.COLOR_BLACK),
+            "code_frame": (245, -1) if color_count >= 256 else (curses.COLOR_BLUE, -1),
             "quote": (curses.COLOR_MAGENTA, -1),
             "rule": (curses.COLOR_BLUE, -1),
             "bullet": (curses.COLOR_WHITE, -1),
@@ -452,6 +456,12 @@ class Composer:
                 gutter_attr = self.style("marker" if block_kind != "tool" else "tool")
             _safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
             x = 1 + len(prefix)
+            if markdown_kind == "code":
+                if is_code_frame(text):
+                    content_attr = self.style("code_frame", content_attr)
+                elif content_attr == self.style("code"):
+                    self.draw_code_line(screen, y, x, text, inner_width)
+                    continue
             segments, _bold = bold_segments(text, bold_at_row[top + y - 3])
             for segment, is_bold in segments:
                 room = inner_width - (x - 1)
@@ -460,6 +470,20 @@ class Composer:
                 attr = content_attr | curses.A_BOLD if is_bold else content_attr
                 _safe_addnstr(screen, y, x, segment, room, attr)
                 x += len(segment)
+
+    def draw_code_line(
+        self, screen: curses.window, y: int, x: int, text: str, inner_width: int
+    ) -> None:
+        """Code on a filled background so the block reads as a box; comments are dimmer."""
+        code_attr = self.style("code")
+        room = inner_width - (x - 1)
+        _safe_addnstr(screen, y, x, " " * max(0, room), room, code_attr)
+        code, comment = split_code_comment(text)
+        _safe_addnstr(screen, y, x, code, room, code_attr)
+        if comment:
+            _safe_addnstr(
+                screen, y, x + len(code), comment, room - len(code), self.style("code_comment", code_attr)
+            )
 
     def draw_footer(self, screen: curses.window, inner_bottom: int, inner_width: int) -> None:
         _safe_addnstr(

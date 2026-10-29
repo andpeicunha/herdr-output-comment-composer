@@ -15,7 +15,7 @@ Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app
 - Splits output into selectable blocks: prompts, paragraphs, list items,
   headings, quotes, tool calls, every row of a table, and every line of a code
   fence, so you can comment on a single table row or a single line of code.
-- Renders Markdown the way the agent UIs do: `**bold**` as bold, code fences with
+- Renders Markdown the way the agent UIs do: `**bold**` as bold, code fences on a light-on-dark box (comments in the code are dimmer) with
   a `─ code · lang ─` marker, and tables with aligned columns. A table that does
   not fit the pane shows as one record per row (`Name: value` lines with the full
   text, no cut cells), like the agent UIs do.
