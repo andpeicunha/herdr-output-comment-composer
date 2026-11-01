@@ -227,6 +227,8 @@ class Composer:
         pairs = {
             "selected": selected_color_pair(color_count),
             "cursor": (255, 25) if color_count >= 256 else (curses.COLOR_BLACK, curses.COLOR_WHITE),
+            "pane_border": (39, -1) if color_count >= 256 else (curses.COLOR_CYAN, -1),
+            "pane_title": (255, 24) if color_count >= 256 else (curses.COLOR_WHITE, curses.COLOR_BLUE),
             "comment": (curses.COLOR_YELLOW, -1),
             "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
             "muted": (curses.COLOR_BLUE, -1),
@@ -259,8 +261,9 @@ class Composer:
     def draw_loading(self, screen: curses.window) -> None:
         screen.erase()
         height, width = screen.getmaxyx()
-        title = " Output Comment Composer "
-        _safe_addnstr(screen, 0, 0, title.ljust(max(0, width - 1)), width - 1, curses.A_REVERSE)
+        border_attr = self.style("pane_border", curses.A_BOLD) | curses.A_BOLD
+        self.draw_frame(screen, border_attr)
+        _safe_addnstr(screen, 1, 1, " Output Comment Composer ", width - 2, self.style("muted"))
         message = "Loading snapshot…"
         x = max(0, (width - len(message)) // 2)
         _safe_addnstr(screen, max(1, height // 2), x, message, width - x - 1, curses.A_BOLD)
@@ -279,7 +282,7 @@ class Composer:
         # While typing, the comment box's divider closes the viewer instead of the frame.
         inner_bottom = viewer_height - 1 if box_height else height - 2
         inner_width = width - 2
-        border_attr = self.style("comment", curses.A_BOLD) | curses.A_BOLD
+        border_attr = self.style("pane_border", curses.A_BOLD) | curses.A_BOLD
         self.draw_frame(screen, border_attr)
 
         markdown, rows = self.layout_rows(max(1, width - 6))
@@ -303,26 +306,16 @@ class Composer:
         screen.refresh()
 
     def draw_frame(self, screen: curses.window, border_attr: int) -> None:
-        """Heavy frame with the COMMENTS banner and the header separator."""
+        """Bright frame and filled title bar for the open pane."""
         width = screen.getmaxyx()[1]
         _draw_heavy_box(screen, border_attr)
+        title_attr = self.style("pane_title", curses.A_REVERSE) | curses.A_BOLD
+        _safe_addnstr(screen, 0, 1, " " * (width - 2), width - 2, title_attr)
         badge = " ✎ COMMENTS "
-        _safe_addnstr(
-            screen,
-            0,
-            2,
-            badge,
-            width - 4,
-            self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
-        )
-        _safe_addnstr(
-            screen,
-            0,
-            2 + len(badge),
-            " Output Comment Composer ",
-            width - len(badge) - 4,
-            border_attr,
-        )
+        _safe_addnstr(screen, 0, 2, badge, width - 4, title_attr)
+        open_label = " PANE ABERTA "
+        if width >= len(badge) + len(open_label) + 6:
+            _safe_addnstr(screen, 0, width - len(open_label) - 2, open_label, len(open_label), title_attr)
         _safe_addnstr(screen, 2, 1, "─" * (width - 2), width - 2, self.style("muted"))
 
     def layout_rows(
