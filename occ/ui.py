@@ -42,10 +42,10 @@ _COMMENT_BOX_HEIGHT = 5
 
 
 def selected_color_pair(color_count: int) -> tuple[int, int]:
-    """Use a quiet neutral background when the terminal supports 256 colors."""
+    """Use light text on a blue background for the selected line."""
     if color_count >= 256:
-        return 250, 235
-    return curses.COLOR_GREEN, -1
+        return 250, 24
+    return curses.COLOR_WHITE, curses.COLOR_BLUE
 
 
 _EDITOR_KEYS = {
@@ -226,7 +226,7 @@ class Composer:
         color_count = getattr(curses, "COLORS", 0)
         pairs = {
             "selected": selected_color_pair(color_count),
-            "cursor": (curses.COLOR_BLACK, 250 if color_count >= 256 else curses.COLOR_WHITE),
+            "cursor": (255, 25) if color_count >= 256 else (curses.COLOR_BLACK, curses.COLOR_WHITE),
             "comment": (curses.COLOR_YELLOW, -1),
             "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
             "muted": (curses.COLOR_BLUE, -1),
@@ -438,11 +438,12 @@ class Composer:
             else:
                 prefix = "  "
             _rendered, markdown_kind = markdown[line_index]
+            is_selected = selected_start <= line_index <= selected_end
             if self.has_selection and line_index == self.cursor:
                 # The cursor stays visible: a stronger highlight than the selection's.
                 content_attr = self.style("cursor", curses.A_REVERSE) | curses.A_BOLD
                 gutter_attr = content_attr
-            elif selected_start <= line_index <= selected_end:
+            elif is_selected:
                 content_attr = self.style("selected", curses.A_REVERSE)
                 gutter_attr = content_attr
             else:
@@ -454,9 +455,11 @@ class Composer:
                     fallback = curses.A_BOLD if markdown_kind == "heading" else 0
                     content_attr = self.style(markdown_kind, fallback)
                 gutter_attr = self.style("marker" if block_kind != "tool" else "tool")
+            if is_selected:
+                _safe_addnstr(screen, y, 1, " " * inner_width, inner_width, content_attr)
             _safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
             x = 1 + len(prefix)
-            if markdown_kind == "code":
+            if markdown_kind == "code" and not is_selected:
                 if is_code_frame(text):
                     content_attr = self.style("code_frame", content_attr)
                 elif content_attr == self.style("code"):

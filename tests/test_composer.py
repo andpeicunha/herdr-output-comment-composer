@@ -1,3 +1,4 @@
+import curses
 import os
 import tempfile
 import unittest
@@ -128,9 +129,9 @@ class ComposerTests(unittest.TestCase):
         self.assertEqual(selection_bounds(3, None, None), (3, 3))
         self.assertEqual(selection_bounds(3, 7, None), (3, 7))
 
-    def test_selection_uses_soft_dark_green_when_supported(self):
-        self.assertEqual(selected_color_pair(256), (250, 235))
-        self.assertEqual(selected_color_pair(8), (2, -1))
+    def test_selection_uses_blue_background_with_light_text(self):
+        self.assertEqual(selected_color_pair(256), (250, 24))
+        self.assertEqual(selected_color_pair(8), (curses.COLOR_WHITE, curses.COLOR_BLUE))
 
     def test_inline_bullets_become_separate_markdown_rows(self):
         formatted = format_markdown_lines(["• first • second • third"])
