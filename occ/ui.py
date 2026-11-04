@@ -7,6 +7,10 @@ import termios
 import time
 import traceback
 
+from herdr_shared_ui import (
+    draw_heavy_frame, draw_title_bar, fill_row, initialize_colors, safe_addnstr,
+)
+
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
 from .keys import ALT_DOWN, ALT_UP, read_key
 from .help import COMPOSER_HELP, clamp_scroll, help_layout
@@ -41,13 +45,6 @@ from .transcript import fetch_transcript, load_meta
 _COMMENT_BOX_HEIGHT = 5
 
 
-def selected_color_pair(color_count: int) -> tuple[int, int]:
-    """Use light text on a blue background for the selected line."""
-    if color_count >= 256:
-        return 250, 24
-    return curses.COLOR_WHITE, curses.COLOR_BLUE
-
-
 _EDITOR_KEYS = {
     "\n": TextBuffer.newline,
     "\r": TextBuffer.newline,
@@ -61,29 +58,6 @@ _EDITOR_KEYS = {
     curses.KEY_UP: TextBuffer.move_up,
     curses.KEY_DOWN: TextBuffer.move_down,
 }
-
-
-def _draw_heavy_box(window: curses.window, attr: int = 0) -> None:
-    height, width = window.getmaxyx()
-    if height < 2 or width < 2:
-        return
-    horizontal = "━" * (width - 2)
-    _safe_addnstr(window, 0, 0, f"┏{horizontal}┓", width, attr)
-    for y in range(1, height - 1):
-        _safe_addnstr(window, y, 0, "┃", 1, attr)
-        _safe_addnstr(window, y, width - 1, "┃", 1, attr)
-    _safe_addnstr(window, height - 1, 0, f"┗{horizontal}┛", width, attr)
-
-
-def _safe_addnstr(
-    screen: curses.window, y: int, x: int, text: str, width: int, attr: int = 0
-) -> None:
-    if width <= 0:
-        return
-    try:
-        screen.addnstr(y, x, text, width, attr)
-    except curses.error:
-        pass
 
 
 class Composer:
@@ -219,41 +193,12 @@ class Composer:
         self.status = f"Selected {end - start + 1} block(s) · c comment · y copy · Esc clears"
 
     def setup_colors(self) -> None:
-        if not curses.has_colors():
-            return
-        curses.start_color()
-        curses.use_default_colors()
         color_count = getattr(curses, "COLORS", 0)
-        pairs = {
-            "selected": selected_color_pair(color_count),
-            "cursor": (255, 25) if color_count >= 256 else (curses.COLOR_BLACK, curses.COLOR_WHITE),
-            "pane_border": (39, -1) if color_count >= 256 else (curses.COLOR_CYAN, -1),
-            "pane_title": (255, 24) if color_count >= 256 else (curses.COLOR_WHITE, curses.COLOR_BLUE),
-            "comment": (curses.COLOR_YELLOW, -1),
-            "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
-            "muted": (curses.COLOR_BLUE, -1),
-            "footer": (curses.COLOR_WHITE, curses.COLOR_BLUE),
-            "success": (curses.COLOR_GREEN, -1),
-            "error": (curses.COLOR_RED, -1),
-            "heading": (curses.COLOR_CYAN, -1),
-            "code": (252, 236) if color_count >= 256 else (curses.COLOR_WHITE, curses.COLOR_BLACK),
-            "code_comment": (245, 236) if color_count >= 256 else (curses.COLOR_CYAN, curses.COLOR_BLACK),
-            "code_frame": (245, -1) if color_count >= 256 else (curses.COLOR_BLUE, -1),
-            "quote": (curses.COLOR_MAGENTA, -1),
-            "rule": (curses.COLOR_BLUE, -1),
-            "bullet": (curses.COLOR_WHITE, -1),
-            "table": (curses.COLOR_WHITE, -1),
-            "record": (curses.COLOR_WHITE, -1),
-            "marker": (curses.COLOR_GREEN, -1),
+        self.colors = initialize_colors(curses, {
             "prompt": (curses.COLOR_WHITE, -1),
             "tool": (245 if color_count >= 256 else curses.COLOR_BLUE, -1),
-        }
-        for number, (name, colors) in enumerate(pairs.items(), 1):
-            try:
-                curses.init_pair(number, *colors)
-                self.colors[name] = curses.color_pair(number)
-            except curses.error:
-                pass
+            "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
+        })
 
     def style(self, name: str, fallback: int = 0) -> int:
         return self.colors.get(name, fallback)
@@ -263,10 +208,10 @@ class Composer:
         height, width = screen.getmaxyx()
         border_attr = self.style("pane_border", curses.A_BOLD) | curses.A_BOLD
         self.draw_frame(screen, border_attr)
-        _safe_addnstr(screen, 1, 1, " Output Comment Composer ", width - 2, self.style("muted"))
+        safe_addnstr(screen, 1, 1, " Output Comment Composer ", width - 2, self.style("muted"))
         message = "Loading snapshot…"
         x = max(0, (width - len(message)) // 2)
-        _safe_addnstr(screen, max(1, height // 2), x, message, width - x - 1, curses.A_BOLD)
+        safe_addnstr(screen, max(1, height // 2), x, message, width - x - 1, curses.A_BOLD)
         screen.refresh()
 
     def draw(self, screen: curses.window) -> None:
@@ -275,7 +220,7 @@ class Composer:
         box_height = _COMMENT_BOX_HEIGHT if self.editor is not None else 0
         viewer_height = height - box_height
         if viewer_height < 8 or width < 30:
-            _safe_addnstr(screen, 0, 0, "Pane too small", width - 1, curses.A_BOLD)
+            safe_addnstr(screen, 0, 0, "Pane too small", width - 1, curses.A_BOLD)
             screen.refresh()
             return
 
@@ -308,15 +253,14 @@ class Composer:
     def draw_frame(self, screen: curses.window, border_attr: int) -> None:
         """Bright frame and filled title bar for the open pane."""
         width = screen.getmaxyx()[1]
-        _draw_heavy_box(screen, border_attr)
+        draw_heavy_frame(screen, border_attr)
         title_attr = self.style("pane_title", curses.A_REVERSE) | curses.A_BOLD
-        _safe_addnstr(screen, 0, 1, " " * (width - 2), width - 2, title_attr)
         badge = " ✎ COMMENTS "
-        _safe_addnstr(screen, 0, 2, badge, width - 4, title_attr)
         open_label = " PANE ABERTA "
-        if width >= len(badge) + len(open_label) + 6:
-            _safe_addnstr(screen, 0, width - len(open_label) - 2, open_label, len(open_label), title_attr)
-        _safe_addnstr(screen, 2, 1, "─" * (width - 2), width - 2, self.style("muted"))
+        if width < len(badge) + len(open_label) + 6:
+            open_label = ""
+        draw_title_bar(screen, badge, title_attr, open_label)
+        safe_addnstr(screen, 2, 1, "─" * (width - 2), width - 2, self.style("muted"))
 
     def layout_rows(
         self, content_width: int
@@ -369,7 +313,7 @@ class Composer:
         if scroll_label:
             position += f" · {scroll_label}"
         meta = f" source {self.source_pane}  ·  {len(self.comments)} comment(s)  ·  {position} "
-        _safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
+        safe_addnstr(screen, 1, 1, meta, inner_width, self.style("muted"))
 
     def draw_scrollbar(
         self, screen: curses.window, total_rows: int, available: int, top: int, border_attr: int
@@ -382,9 +326,9 @@ class Composer:
         thumb_start, thumb_size = thumb
         for offset in range(available):
             if thumb_start <= offset < thumb_start + thumb_size:
-                _safe_addnstr(screen, 3 + offset, x, "┃", 1, border_attr)
+                safe_addnstr(screen, 3 + offset, x, "┃", 1, border_attr)
             else:
-                _safe_addnstr(screen, 3 + offset, x, "│", 1, self.style("muted"))
+                safe_addnstr(screen, 3 + offset, x, "│", 1, self.style("muted"))
 
     def draw_rows(
         self,
@@ -411,7 +355,7 @@ class Composer:
                 continue
             if kind in ("comment", "comment_continuation"):
                 prefix = COMMENT_PREFIX if kind == "comment" else " " * len(COMMENT_PREFIX)
-                _safe_addnstr(
+                safe_addnstr(
                     screen,
                     y,
                     1,
@@ -434,7 +378,7 @@ class Composer:
             is_selected = selected_start <= line_index <= selected_end
             if self.has_selection and line_index == self.cursor:
                 # The cursor stays visible: a stronger highlight than the selection's.
-                content_attr = self.style("cursor", curses.A_REVERSE) | curses.A_BOLD
+                content_attr = self.style("active_cursor", curses.A_REVERSE) | curses.A_BOLD
                 gutter_attr = content_attr
             elif is_selected:
                 content_attr = self.style("selected", curses.A_REVERSE)
@@ -449,8 +393,8 @@ class Composer:
                     content_attr = self.style(markdown_kind, fallback)
                 gutter_attr = self.style("marker" if block_kind != "tool" else "tool")
             if is_selected:
-                _safe_addnstr(screen, y, 1, " " * inner_width, inner_width, content_attr)
-            _safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
+                fill_row(screen, y, 1, inner_width, content_attr)
+            safe_addnstr(screen, y, 1, prefix, len(prefix), gutter_attr)
             x = 1 + len(prefix)
             if markdown_kind == "code" and not is_selected:
                 if is_code_frame(text):
@@ -464,7 +408,7 @@ class Composer:
                 if room <= 0:
                     break
                 attr = content_attr | curses.A_BOLD if is_bold else content_attr
-                _safe_addnstr(screen, y, x, segment, room, attr)
+                safe_addnstr(screen, y, x, segment, room, attr)
                 x += len(segment)
 
     def draw_code_line(
@@ -473,16 +417,16 @@ class Composer:
         """Code on a filled background so the block reads as a box; comments are dimmer."""
         code_attr = self.style("code")
         room = inner_width - (x - 1)
-        _safe_addnstr(screen, y, x, " " * max(0, room), room, code_attr)
+        fill_row(screen, y, x, room, code_attr)
         code, comment = split_code_comment(text)
-        _safe_addnstr(screen, y, x, code, room, code_attr)
+        safe_addnstr(screen, y, x, code, room, code_attr)
         if comment:
-            _safe_addnstr(
+            safe_addnstr(
                 screen, y, x + len(code), comment, room - len(code), self.style("code_comment", code_attr)
             )
 
     def draw_footer(self, screen: curses.window, inner_bottom: int, inner_width: int) -> None:
-        _safe_addnstr(
+        safe_addnstr(
             screen,
             inner_bottom - 2,
             1,
@@ -491,9 +435,9 @@ class Composer:
             self.style("muted"),
         )
         status_attr = self.style("error") if self.status.startswith("Error") else self.style("success")
-        _safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
+        safe_addnstr(screen, inner_bottom - 1, 2, self.status, inner_width - 1, status_attr)
         footer = " ↑/↓ move · ⇧↑/↓ select · c comment · s send · q close · ? help "
-        _safe_addnstr(
+        safe_addnstr(
             screen,
             inner_bottom,
             1,
@@ -508,9 +452,9 @@ class Composer:
         inner_height = _COMMENT_BOX_HEIGHT - 2
         inner_width = width - 4
         # Divider joined to the pane frame; the frame supplies the sides and bottom.
-        _safe_addnstr(screen, top, 0, "┣" + "━" * (width - 2) + "┫", width, border_attr)
+        safe_addnstr(screen, top, 0, "┣" + "━" * (width - 2) + "┫", width, border_attr)
         badge = " ✎ COMMENT "
-        _safe_addnstr(
+        safe_addnstr(
             screen,
             top,
             2,
@@ -519,7 +463,7 @@ class Composer:
             self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
         )
         label_x = 2 + len(badge)
-        _safe_addnstr(
+        safe_addnstr(
             screen,
             top,
             label_x,
@@ -538,9 +482,9 @@ class Composer:
         for offset, (_logical, _start, text) in enumerate(
             visual_rows[self.edit_top : self.edit_top + inner_height], 1
         ):
-            _safe_addnstr(screen, top + offset, 2, text, inner_width)
+            safe_addnstr(screen, top + offset, 2, text, inner_width)
         help_text = " Ctrl+S save · Ctrl+U clear · Tab/⇧Tab next/prev · Enter newline · Esc cancel "
-        _safe_addnstr(screen, height - 1, 2, help_text, width - 4, self.style("muted"))
+        safe_addnstr(screen, height - 1, 2, help_text, width - 4, self.style("muted"))
         try:
             screen.move(top + 1 + cursor_row - self.edit_top, 2 + min(cursor_col, inner_width - 1))
         except curses.error:
@@ -636,8 +580,8 @@ class Composer:
         offset = 0
         while True:
             modal.erase()
-            _draw_heavy_box(modal, border_attr)
-            _safe_addnstr(
+            draw_heavy_frame(modal, border_attr)
+            safe_addnstr(
                 modal, 0, 2, " Shortcuts ", modal_width - 4,
                 self.style("comment_badge", curses.A_REVERSE) | curses.A_BOLD,
             )
@@ -650,13 +594,13 @@ class Composer:
                     if compact
                     else f"· ↑/↓ scroll ({span} of {len(rows)}) "
                 )
-            _safe_addnstr(modal, modal_height - 1, 2, hint, modal_width - 4, self.style("muted"))
+            safe_addnstr(modal, modal_height - 1, 2, hint, modal_width - 4, self.style("muted"))
             for y, (kind, keys, text) in enumerate(rows[offset : offset + visible], 1):
                 if kind == "section":
-                    _safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("heading", curses.A_BOLD) | curses.A_BOLD)
+                    safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("heading", curses.A_BOLD) | curses.A_BOLD)
                 elif kind == "key":
-                    _safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("comment", curses.A_BOLD) | curses.A_BOLD)
-                    _safe_addnstr(modal, y, 2 + indent, text, modal_width - 4 - indent)
+                    safe_addnstr(modal, y, 2, keys, modal_width - 4, self.style("comment", curses.A_BOLD) | curses.A_BOLD)
+                    safe_addnstr(modal, y, 2 + indent, text, modal_width - 4 - indent)
             modal.refresh()
             key = modal.get_wch()
             if key in ("?", "\x1b", "q", "\n", "\r", curses.KEY_ENTER):
@@ -697,7 +641,7 @@ class Composer:
         while True:
             modal.erase()
             modal.box()
-            _safe_addnstr(
+            safe_addnstr(
                 modal,
                 0,
                 2,
@@ -705,7 +649,7 @@ class Composer:
                 modal_width - 4,
                 self.style("error", curses.A_BOLD) | curses.A_BOLD,
             )
-            _safe_addnstr(
+            safe_addnstr(
                 modal,
                 2,
                 3,
@@ -713,7 +657,7 @@ class Composer:
                 modal_width - 6,
             )
             buttons = f"[ Enter / n: go back ]    [ {yes_label} ]"
-            _safe_addnstr(
+            safe_addnstr(
                 modal,
                 4,
                 max(2, (modal_width - len(buttons)) // 2),
@@ -721,7 +665,7 @@ class Composer:
                 modal_width - 4,
                 self.style("comment", curses.A_BOLD),
             )
-            _safe_addnstr(
+            safe_addnstr(
                 modal,
                 5,
                 3,

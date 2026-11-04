@@ -186,3 +186,27 @@ For local testing:
 ```sh
 herdr plugin link .
 ```
+
+### Shared terminal UI
+
+The canonical source is `herdr_shared_ui` in the `herdr-spec-review` repository.
+This plugin bundles a fixed copy at version `1.0.0`; its `__init__.py` SHA-256 is
+`4fe30c2666126511667900a2af8844c6ec626b048594514f581020b11fac5111`.
+The plugin imports this local copy and needs no network or sibling checkout at runtime.
+
+To update it, copy the complete canonical `herdr_shared_ui` directory into this
+checkout, including `VERSION` and `PIN`. Verify the source digest against `PIN`,
+update the version and digest in this README and the conformance test, then run
+the test suite and inspect the interface in a terminal. Commit the bundled copy
+with the plugin so normal Herdr updates include it.
+
+A fonte canônica fica em `herdr-spec-review/herdr_shared_ui`. Este plugin embute
+uma cópia fixa na versão `1.0.0`; o SHA-256 de `__init__.py` é
+`4fe30c2666126511667900a2af8844c6ec626b048594514f581020b11fac5111`. A execução
+usa apenas os arquivos locais do plugin e não precisa de rede nem do outro checkout.
+
+Para atualizar, copie o diretório canônico completo, incluindo `VERSION` e `PIN`,
+para este checkout. Confira o digest indicado em `PIN`, atualize a versão e o
+digest neste README e no teste de conformidade, execute os testes e confira a
+interface no terminal. Inclua a cópia embutida no commit do plugin para que o
+update normal do Herdr instale todos os arquivos necessários.

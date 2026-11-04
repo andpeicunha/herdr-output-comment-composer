@@ -39,7 +39,7 @@ from occ.transcript import (
     limit_transcript_blocks,
     transcript_max_lines,
 )
-from occ.ui import _EDITOR_KEYS, Composer, selected_color_pair
+from occ.ui import _EDITOR_KEYS, Composer
 
 
 class ComposerTests(unittest.TestCase):
@@ -128,10 +128,6 @@ class ComposerTests(unittest.TestCase):
     def test_selection_uses_anchor_or_finished_range(self):
         self.assertEqual(selection_bounds(3, None, None), (3, 3))
         self.assertEqual(selection_bounds(3, 7, None), (3, 7))
-
-    def test_selection_uses_blue_background_with_light_text(self):
-        self.assertEqual(selected_color_pair(256), (250, 24))
-        self.assertEqual(selected_color_pair(8), (curses.COLOR_WHITE, curses.COLOR_BLUE))
 
     def test_inline_bullets_become_separate_markdown_rows(self):
         formatted = format_markdown_lines(["• first • second • third"])
