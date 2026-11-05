@@ -196,9 +196,13 @@ herdr plugin link .
 ### Shared terminal UI
 
 The canonical source is `herdr_shared_ui` in the `herdr-spec-review` repository.
-This plugin bundles a fixed copy at version `1.0.0`; its `__init__.py` SHA-256 is
-`4fe30c2666126511667900a2af8844c6ec626b048594514f581020b11fac5111`.
-The plugin imports this local copy and needs no network or sibling checkout at runtime.
+This plugin bundles a fixed copy at version `1.2.0`, pinned by the package digest
+in `herdr_shared_ui/PIN`. The Mermaid preview uses bundled `mermaid-ascii` binaries
+for macOS and Linux on ARM64 and x86_64; it requires no Node, Go, or runtime download.
+Compatible Mermaid code blocks render automatically in the Markdown view. Press `m`
+to open the current diagram in a larger scrollable preview. Unsupported syntax,
+unavailable renderers, and diagrams wider than the pane stay as source code. The
+plugin needs no network or sibling checkout at runtime.
 
 To update it, copy the complete canonical `herdr_shared_ui` directory into this
 checkout, including `VERSION` and `PIN`. Verify the source digest against `PIN`,
@@ -207,15 +211,19 @@ the test suite and inspect the interface in a terminal. Commit the bundled copy
 with the plugin so normal Herdr updates include it.
 
 A fonte canônica fica em `herdr-spec-review/herdr_shared_ui`. Este plugin embute
-uma cópia fixa na versão `1.0.0`; o SHA-256 de `__init__.py` é
-`4fe30c2666126511667900a2af8844c6ec626b048594514f581020b11fac5111`. A execução
-usa apenas os arquivos locais do plugin e não precisa de rede nem do outro checkout.
+uma cópia fixa na versão `1.2.0`, validada pelo digest em `herdr_shared_ui/PIN`.
+A prévia Mermaid usa binários `mermaid-ascii` incluídos para macOS e Linux em
+ARM64 e x86_64; não exige Node, Go nem download durante a execução. Diagramas
+compatíveis são renderizados automaticamente no Markdown. Pressione `m` para abrir
+o diagrama atual em uma prévia rolável maior. Sintaxe não suportada, renderer
+indisponível ou diagramas mais largos que o painel permanecem como código-fonte.
+O plugin não precisa de rede nem do outro checkout durante a execução.
 
 Para atualizar, copie o diretório canônico completo, incluindo `VERSION` e `PIN`,
 para este checkout. Confira o digest indicado em `PIN`, atualize a versão e o
-digest neste README e no teste de conformidade, execute os testes e confira a
-interface no terminal. Inclua a cópia embutida no commit do plugin para que o
-update normal do Herdr instale todos os arquivos necessários.
+teste de conformidade, execute os testes e confira a interface no terminal. Inclua
+a cópia embutida e os assets no commit do plugin para que a atualização normal do
+Herdr instale todos os arquivos necessários.
 
 
 ### UI tests

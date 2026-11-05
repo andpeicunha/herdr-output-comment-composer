@@ -156,7 +156,7 @@ def split_box_table(block: str) -> list[tuple[str, str]]:
 
 def continues_run(previous_role: str, role: str) -> bool:
     """True when a block continues the previous one (code lines, table rows) with no gap."""
-    return role in ("code", "trow") or (role == "tline" and previous_role == "tline")
+    return role in ("code", "trow", "mermaid_render") or (role == "tline" and previous_role == "tline")
 
 
 def split_markdown_blocks(text: str) -> list[tuple[str, str]]:
@@ -425,6 +425,15 @@ def format_markdown_lines(
             indent_stack.clear()
         if index in tables:
             formatted.append(tables[index])
+            continue
+        if role == "mermaid_label":
+            formatted.append(("─ Mermaid preview " + "─" * 8, "code"))
+            continue
+        if role == "mermaid_render":
+            formatted.append(("\n".join("  " + item for item in line.splitlines()), "code"))
+            continue
+        if role in ("mermaid_hidden", "mermaid_tail"):
+            formatted.append(("", "code"))
             continue
         if role == "fence":
             language = stripped.lstrip("`~").strip()

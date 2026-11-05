@@ -11,6 +11,12 @@ from herdr_shared_ui import (
     draw_heavy_frame, draw_title_bar, fill_row, initialize_colors, safe_addnstr,
 )
 from herdr_shared_ui.controls import Button, Modal
+from herdr_shared_ui.mermaid import (
+    extract_mermaid_source,
+    prepare_mermaid_blocks,
+    remap_mermaid_comments,
+    show_mermaid_viewer,
+)
 
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
 from .keys import ALT_DOWN, ALT_UP, read_key
@@ -86,6 +92,7 @@ class Composer:
         # Layout from the last draw, used to page by screen rows.
         self.display_rows: list[tuple[str, int, str]] = []
         self.visible_rows = 1
+        self.mermaid_cursor_targets: list[int] = []
 
     def run(self, screen: curses.window) -> None:
         curses.curs_set(0)
@@ -141,7 +148,8 @@ class Composer:
                 page = max(1, self.visible_rows // 2)
                 if key in (ALT_UP, curses.KEY_PPAGE, ord("u")):
                     page = -page
-                self.cursor = page_target(self.display_rows, self.cursor, page)
+                visual_cursor = self.mermaid_cursor_targets[self.cursor]
+                self.cursor = page_target(self.display_rows, visual_cursor, page)
             elif key == ord("g"):
                 self.cursor = 0
             elif key == ord("G"):
@@ -152,6 +160,22 @@ class Composer:
                 self.copy_selection()
             elif key == ord("t"):
                 self.cycle_theme()
+            elif key == ord("m"):
+                source = extract_mermaid_source(self.lines, self.block_code, self.cursor)
+                if source is None:
+                    self.status = "Current block is not inside a Mermaid diagram"
+                else:
+                    height, width = screen.getmaxyx()
+                    show_mermaid_viewer(
+                        screen,
+                        source,
+                        width=max(1, width - 4),
+                        style={
+                            "border": self.style("pane_border"),
+                            "title": self.style("pane_title"),
+                            "muted": self.style("muted"),
+                        },
+                    )
             elif key == ord("?"):
                 self.show_help(screen)
             elif key == ord("s"):
@@ -241,10 +265,11 @@ class Composer:
         self.draw_frame(screen, border_attr)
 
         markdown, rows = self.layout_rows(max(1, width - 6))
+        visual_cursor = self.mermaid_cursor_targets[self.cursor]
         selected_row = next(
             index
             for index, (kind, line_index, _) in enumerate(rows)
-            if kind == "line" and line_index == self.cursor
+            if kind == "line" and line_index == visual_cursor
         )
         available = content_rows_available(height, box_height)
         self.display_rows = rows
@@ -276,14 +301,18 @@ class Composer:
         self, content_width: int
     ) -> tuple[list[tuple[str, str]], list[tuple[str, int, str]]]:
         """Format every block and wrap it into display rows."""
-        markdown = format_markdown_lines(self.lines, content_width, self.block_code)
+        display_lines, display_code, hidden, cursor_targets = prepare_mermaid_blocks(
+            self.lines, self.block_code, content_width
+        )
+        self.mermaid_cursor_targets = cursor_targets
+        markdown = format_markdown_lines(display_lines, content_width, display_code)
         rendered_blocks = []
         for index, (text, _kind) in enumerate(markdown):
             block_kind = self.block_kinds[index]
             # Assistant blocks and code lines keep the formatted text.
             if block_kind == "tool":
                 text = self.lines[index]
-            elif block_kind == "user" and not self.block_code[index]:
+            elif block_kind == "user" and not display_code[index]:
                 text = mark_inline_markup(self.lines[index])
             rendered_blocks.append(text)
         compact_after = {
@@ -294,11 +323,14 @@ class Composer:
                 and markdown[index + 1][1] == "bullet"
                 and not self.block_starts[index + 1]
             )
-            or continues_run(self.block_code[index], self.block_code[index + 1])
+            or continues_run(display_code[index], display_code[index + 1])
+            or display_code[index].startswith("mermaid_")
+            and display_code[index + 1].startswith("mermaid_")
+            and display_code[index + 1] != "mermaid_tail"
         }
         rows = build_display_rows(
             rendered_blocks,
-            self.displayed_comments(),
+            remap_mermaid_comments(self.displayed_comments(), cursor_targets),
             width=content_width,
             spacing=True,
             compact_after=compact_after,
@@ -308,6 +340,7 @@ class Composer:
                 if kind in ("table", "record") and self.block_kinds[index] == "assistant"
             },
             preserve_space={index for index, (_text, kind) in enumerate(markdown) if kind == "code"},
+            hidden=hidden,
         )
         return markdown, rows
 
@@ -350,6 +383,16 @@ class Composer:
         inner_width: int,
     ) -> None:
         selected_start, selected_end = self.current_selection()
+        cursor_targets = (
+            self.mermaid_cursor_targets
+            if len(self.mermaid_cursor_targets) == len(self.lines)
+            else list(range(len(self.lines)))
+        )
+        selected_visual = {
+            cursor_targets[index]
+            for index in range(selected_start, selected_end + 1)
+        }
+        visual_cursor = cursor_targets[self.cursor]
         # Bold state at the start of each row, so a bold span wrapped over rows stays bold.
         bold_at_row: list[bool] = []
         bold = False
@@ -385,8 +428,8 @@ class Composer:
             else:
                 prefix = "  "
             _rendered, markdown_kind = markdown[line_index]
-            is_selected = selected_start <= line_index <= selected_end
-            if self.has_selection and line_index == self.cursor:
+            is_selected = line_index in selected_visual
+            if self.has_selection and line_index == visual_cursor:
                 # The cursor stays visible: a stronger highlight than the selection's.
                 content_attr = self.style("active_cursor", curses.A_REVERSE) | curses.A_BOLD
                 gutter_attr = content_attr

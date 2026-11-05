@@ -42,7 +42,10 @@ COMPOSER_HELP: list[Section] = [
     ),
     (
         "View",
-        [("t", "cycle and save the viewer theme")],
+        [
+            ("m", "open the current Mermaid diagram in a larger preview"),
+            ("t", "cycle and save the viewer theme"),
+        ],
     ),
     (
         "Other",

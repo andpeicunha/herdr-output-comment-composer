@@ -17,6 +17,7 @@ def build_display_rows(
     compact_after: set[int] | None = None,
     no_wrap: set[int] | None = None,
     preserve_space: set[int] | None = None,
+    hidden: set[int] | None = None,
 ) -> list[tuple[str, int, str]]:
     """Wrap blocks into display rows.
 
@@ -26,6 +27,8 @@ def build_display_rows(
     """
     rows: list[tuple[str, int, str]] = []
     for index, line in enumerate(lines):
+        if index in (hidden or set()):
+            continue
         first_row = True
         physical_lines = line.splitlines() or [""]
         for physical_line in physical_lines:

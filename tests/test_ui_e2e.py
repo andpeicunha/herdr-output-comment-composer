@@ -47,6 +47,20 @@ class ComposerTerminalE2ETests(unittest.TestCase):
             ui.send("\t\n")
             self.assertEqual(ui.process.wait(timeout=3), 0)
 
+    def test_mermaid_shortcut_opens_scrollable_preview(self):
+        with tempfile.TemporaryDirectory() as config, self.start_ui(config, "mermaid") as ui:
+            ui.wait_for("COMMENTS")
+            ui.wait_for("Mermaid preview")
+            ui.wait_for("Start")
+            ui.send("g")
+            ui.send("j" * 2)
+            ui.send("m")
+            ui.wait_for("Mermaid preview")
+            ui.wait_for("Start")
+            ui.send("q")
+            ui.send("q")
+            self.assertEqual(ui.process.wait(timeout=3), 0)
+
     def test_navigation_shift_selection_and_comment_save_and_send_prompt(self):
         with tempfile.TemporaryDirectory() as config, self.start_ui(config, "edit-send") as ui:
             ui.wait_for("COMMENTS")
