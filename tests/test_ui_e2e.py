@@ -28,11 +28,16 @@ class ComposerTerminalE2ETests(unittest.TestCase):
     def test_theme_help_and_keyboard_confirmation_through_real_curses_ui(self):
         with tempfile.TemporaryDirectory() as config, self.start_ui(config, "theme") as ui:
             ui.wait_for("COMMENTS")
-            for theme in ("herdr-dark", "midnight", "paper"):
+            selected_row = next(
+                row for row in ui.screen.buffer.values()
+                if "second item" in "".join(cell.data for cell in row.values())
+            )
+            self.assertIn("005f87", {cell.bg for cell in selected_row.values()})
+            for theme in ("midnight", "paper", "terminal"):
                 ui.send("t")
                 ui.wait_for(f"Theme: {theme}")
             saved = (Path(config) / "config.env").read_text(encoding="utf-8")
-            self.assertIn("OCC_THEME=paper", saved)
+            self.assertIn("OCC_THEME=terminal", saved)
             ui.send("?")
             ui.send("j" * 20)
             ui.wait_for("cycle and save the viewer theme")

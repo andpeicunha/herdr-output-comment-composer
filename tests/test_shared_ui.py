@@ -32,9 +32,9 @@ class SharedUITests(unittest.TestCase):
             digest.update(len(data).to_bytes(8, 'big'))
             digest.update(data)
         pin = (package / 'PIN').read_text(encoding='utf-8').split()
-        self.assertEqual(ui.VERSION, '1.1.1')
-        self.assertEqual((package / 'VERSION').read_text().strip(), '1.1.1')
-        self.assertEqual(pin, ['1.1.1', f'sha256:{digest.hexdigest()}'])
+        self.assertEqual(ui.VERSION, '1.1.2')
+        self.assertEqual((package / 'VERSION').read_text().strip(), '1.1.2')
+        self.assertEqual(pin, ['1.1.2', f'sha256:{digest.hexdigest()}'])
 
     def test_quote_list_wrapping_indents_continuations_under_list_text(self):
         from herdr_shared_ui.layout import wrap_physical_line

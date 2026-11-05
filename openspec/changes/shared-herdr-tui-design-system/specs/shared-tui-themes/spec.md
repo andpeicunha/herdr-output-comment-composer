@@ -2,17 +2,22 @@
 
 ### Requirement: Configurable viewer themes / Temas configuráveis do viewer
 
-Each plugin MUST let its developer choose a shared named theme in that plugin's configuration. The shared theme set MUST include a terminal-default option and named curated themes. Unsupported terminals or invalid settings MUST fall back safely. The viewer MUST NOT depend on or inherit Herdr's active theme. / Cada plugin DEVE permitir que a pessoa desenvolvedora escolha um tema compartilhado nomeado na configuração daquele plugin. O conjunto compartilhado DEVE incluir uma opção que respeita as cores do terminal e temas nomeados selecionados. Terminais sem suporte ou configurações inválidas DEVEM usar uma alternativa segura. O viewer NÃO DEVE depender nem herdar o tema ativo do Herdr.
+Each plugin MUST let its developer choose a shared named theme in that plugin's configuration. The shared theme set MUST include `herdr-dark` as the visible default and `terminal` as an explicit option for inheriting terminal colors. Missing or invalid settings MUST use `herdr-dark`. Unsupported terminals MUST use a readable reduced-color palette. The viewer MUST NOT depend on or inherit Herdr's active theme. / Cada plugin DEVE permitir que a pessoa desenvolvedora escolha um tema compartilhado nomeado na configuração daquele plugin. O conjunto compartilhado DEVE usar `herdr-dark` como padrão visual e oferecer `terminal` como opção explícita para respeitar as cores do terminal. Configurações ausentes ou inválidas DEVEM usar `herdr-dark`. Terminais sem suporte DEVEM usar uma paleta reduzida e legível. O viewer NÃO DEVE depender nem herdar o tema ativo do Herdr.
 
 #### Scenario: Configured theme on startup / Tema configurado na inicialização
 
 - **WHEN** the viewer starts with a supported theme configured / **QUANDO** o viewer inicia com um tema suportado configurado
 - **THEN** all shared semantic tokens use that theme / **ENTÃO** todos os tokens semânticos compartilhados usam esse tema
 
-#### Scenario: Terminal fallback / Fallback do terminal
+#### Scenario: Styled default / Padrão visual
 
-- **WHEN** no theme is configured, a theme name is invalid, or the terminal lacks required color support / **QUANDO** nenhum tema está configurado, o nome do tema é inválido ou o terminal não oferece o suporte de cor necessário
-- **THEN** the viewer uses a readable terminal-default or reduced-color palette / **ENTÃO** o viewer usa uma paleta legível que respeita as cores do terminal ou reduzida
+- **WHEN** no theme is configured or the configured theme name is invalid / **QUANDO** nenhum tema está configurado ou o nome informado é inválido
+- **THEN** the viewer starts with the `herdr-dark` blue and cyan palette / **ENTÃO** o viewer inicia com a paleta azul e ciano de `herdr-dark`
+
+#### Scenario: Explicit terminal colors / Cores explícitas do terminal
+
+- **WHEN** the user configures `terminal` / **QUANDO** a pessoa configura `terminal`
+- **THEN** the viewer uses the terminal's own colors / **ENTÃO** o viewer respeita as cores do terminal
 
 ### Requirement: Live theme switching / Troca de tema ao vivo
 

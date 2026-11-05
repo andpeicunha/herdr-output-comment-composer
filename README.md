@@ -112,7 +112,11 @@ An environment variable with the same name, set where Herdr runs, overrides it.
 | --- | --- | --- |
 | `OCC_MAX_LINES` | `500` | Transcript lines to load |
 | `OCC_SIGNATURE` | unset | Signature line appended to the sent prompt, e.g. `@your-handle` |
-| `OCC_THEME` | `terminal` | Shared viewer theme: `terminal`, `herdr-dark`, `midnight`, or `paper` |
+| `OCC_THEME` | `herdr-dark` | Shared viewer theme: `herdr-dark`, `midnight`, `paper`, or `terminal` |
+
+Press `t` to cycle through and save the themes. Set `OCC_THEME=terminal` in
+`config.env` when you want the terminal's own colors. Missing or invalid values
+use `herdr-dark`.
 
 Runtime files (per-workspace pane metadata and `crash.log`) live in the plugin
 state directory. Launcher errors appear in

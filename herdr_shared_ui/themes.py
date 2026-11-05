@@ -5,7 +5,7 @@ import curses
 from collections.abc import Mapping
 
 THEME_IDS = ("terminal", "herdr-dark", "midnight", "paper")
-DEFAULT_THEME = "terminal"
+DEFAULT_THEME = "herdr-dark"
 
 _ROLES = (
     "selected", "active_cursor", "pane_border", "pane_title", "comment", "muted",
@@ -14,7 +14,7 @@ _ROLES = (
 )
 
 def normalize_theme(theme: str | None) -> str:
-    """Return a supported theme ID, using terminal defaults for unknown values."""
+    """Return a supported theme ID, using the styled default for unknown values."""
     return theme if theme in THEME_IDS else DEFAULT_THEME
 
 def _palette(curses_module, theme: str, color_count: int) -> dict[str, tuple[int, int]]:

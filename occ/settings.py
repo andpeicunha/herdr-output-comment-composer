@@ -48,7 +48,7 @@ def setting(name: str, default: str = "") -> str:
 
 
 def selected_theme() -> str:
-    """Read the Composer theme with the shared terminal-safe default."""
+    """Read the Composer theme with the shared styled default."""
     return normalize_theme(setting("OCC_THEME", DEFAULT_THEME).strip())
 
 

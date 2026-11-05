@@ -9,13 +9,13 @@ from occ.settings import next_theme, save_theme, selected_theme
 
 
 class ComposerThemeSettingsTests(unittest.TestCase):
-    def test_invalid_or_missing_theme_falls_back_to_terminal(self):
+    def test_invalid_or_missing_theme_uses_herdr_dark_default(self):
         with tempfile.TemporaryDirectory() as config:
             with patch.dict(os.environ, {"HERDR_PLUGIN_CONFIG_DIR": config}, clear=True):
-                self.assertEqual(selected_theme(), "terminal")
+                self.assertEqual(selected_theme(), "herdr-dark")
                 with open(os.path.join(config, "config.env"), "w", encoding="utf-8") as target:
                     target.write("OCC_THEME=unsupported\n")
-                self.assertEqual(selected_theme(), "terminal")
+                self.assertEqual(selected_theme(), "herdr-dark")
 
     def test_theme_cycle_persists_and_preserves_other_settings(self):
         with tempfile.TemporaryDirectory() as config:
