@@ -5,7 +5,7 @@ import curses
 
 from .themes import DEFAULT_THEME, THEME_IDS, initialize_colors, normalize_theme
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 def safe_addnstr(screen, y: int, x: int, text: str, width: int, attr: int = 0) -> None:
     """Write text while containing curses edge-cell errors."""

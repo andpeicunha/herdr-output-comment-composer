@@ -4,7 +4,9 @@ from __future__ import annotations
 import textwrap
 import re
 
-_HANGING_RE = re.compile(r"^\s*(?:[•◦│]|\d+[.)])\s+")
+_HANGING_RE = re.compile(
+    r"^\s*(?:│\s+(?:(?:[-*+•◦]|\d+[.)])\s+)?|(?:[•◦]|\d+[.)])\s+)"
+)
 
 def wrap_physical_line(text: str, width: int, *, preserve_space: bool = False,
                        hanging_indent: int | None = None) -> list[str]:

@@ -32,9 +32,19 @@ class SharedUITests(unittest.TestCase):
             digest.update(len(data).to_bytes(8, 'big'))
             digest.update(data)
         pin = (package / 'PIN').read_text(encoding='utf-8').split()
-        self.assertEqual(ui.VERSION, '1.1.0')
-        self.assertEqual((package / 'VERSION').read_text().strip(), '1.1.0')
-        self.assertEqual(pin, ['1.1.0', f'sha256:{digest.hexdigest()}'])
+        self.assertEqual(ui.VERSION, '1.1.1')
+        self.assertEqual((package / 'VERSION').read_text().strip(), '1.1.1')
+        self.assertEqual(pin, ['1.1.1', f'sha256:{digest.hexdigest()}'])
+
+    def test_quote_list_wrapping_indents_continuations_under_list_text(self):
+        from herdr_shared_ui.layout import wrap_physical_line
+
+        for line in ("│ 2. " + "word " * 8, "│ - " + "word " * 8):
+            prefix = line.split("word", 1)[0]
+            wrapped = wrap_physical_line(line, 24)
+
+            self.assertGreater(len(wrapped), 1)
+            self.assertTrue(all(row.startswith(" " * len(prefix) + "word") for row in wrapped[1:]))
 
     def test_shared_controls_dispatch_plugin_actions_from_keyboard(self):
         from herdr_shared_ui.controls import Button, ButtonBar, Modal
