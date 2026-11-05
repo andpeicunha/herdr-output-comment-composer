@@ -23,18 +23,42 @@ class Screen:
 class SharedUITests(unittest.TestCase):
     def test_pinned_source_digest(self):
         package = Path(ui.__file__).parent
-        self.assertEqual(ui.VERSION, '1.0.0')
-        self.assertEqual((package / 'VERSION').read_text().strip(), '1.0.0')
-        digest = hashlib.sha256((package / '__init__.py').read_bytes()).hexdigest()
-        self.assertEqual(digest, '4fe30c2666126511667900a2af8844c6ec626b048594514f581020b11fac5111')
-        pin = (package / 'PIN').read_text()
-        self.assertTrue(pin.endswith('\n'))
-        self.assertNotIn('\\n', pin)
-        self.assertEqual(pin.strip(), f'1.0.0 sha256:{digest}')
+        digest = hashlib.sha256()
+        for path in sorted(p for p in package.rglob('*') if p.is_file() and p.name != 'PIN' and '__pycache__' not in p.parts):
+            relative = path.relative_to(package).as_posix().encode()
+            data = path.read_bytes()
+            digest.update(len(relative).to_bytes(4, 'big'))
+            digest.update(relative)
+            digest.update(len(data).to_bytes(8, 'big'))
+            digest.update(data)
+        pin = (package / 'PIN').read_text(encoding='utf-8').split()
+        self.assertEqual(ui.VERSION, '1.1.0')
+        self.assertEqual((package / 'VERSION').read_text().strip(), '1.1.0')
+        self.assertEqual(pin, ['1.1.0', f'sha256:{digest.hexdigest()}'])
+
+    def test_shared_controls_dispatch_plugin_actions_from_keyboard(self):
+        from herdr_shared_ui.controls import Button, ButtonBar, Modal
+
+        bar = ButtonBar([Button("Back", "back"), Button("Confirm", "confirm")])
+        self.assertIsNone(bar.handle_key("\t"))
+        self.assertEqual(bar.handle_key("\n"), "confirm")
+        modal = Modal([Button("Confirm", "confirm")], {"confirm": lambda: True})
+        self.assertTrue(modal.handle_key("\n"))
 
     def test_palette_in_both_color_modes_and_without_colors(self):
         for count, expected in [(256, (250, 24)), (8, (curses.COLOR_WHITE, curses.COLOR_BLUE))]:
-            fake = Mock(COLORS=count, error=curses.error)
+            fake = Mock(
+                COLORS=count,
+                error=curses.error,
+                COLOR_BLACK=curses.COLOR_BLACK,
+                COLOR_BLUE=curses.COLOR_BLUE,
+                COLOR_CYAN=curses.COLOR_CYAN,
+                COLOR_GREEN=curses.COLOR_GREEN,
+                COLOR_MAGENTA=curses.COLOR_MAGENTA,
+                COLOR_RED=curses.COLOR_RED,
+                COLOR_WHITE=curses.COLOR_WHITE,
+                COLOR_YELLOW=curses.COLOR_YELLOW,
+            )
             fake.has_colors.return_value = True
             fake.color_pair.side_effect = lambda number: number
             styles = ui.initialize_colors(fake)

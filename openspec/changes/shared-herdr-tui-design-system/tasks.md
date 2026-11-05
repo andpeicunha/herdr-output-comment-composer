@@ -1,0 +1,10 @@
+## Tasks / Tarefas
+
+- [x] Define and document the shared package's public module boundaries and theme token contract. / Definir e documentar os limites dos módulos públicos e o contrato de tokens de tema.
+- [x] Move the identical Markdown implementation into the canonical shared package and update both plugins to import it. / Mover a implementação Markdown idêntica para o pacote compartilhado canônico e atualizar os imports dos dois plugins.
+- [x] Extract stable shared row wrapping/layout behavior while preserving plugin-specific viewer behavior. / Extrair o comportamento estável e compartilhado de quebra/layout de linhas, preservando o comportamento próprio de cada viewer.
+- [x] Add configurable named themes, terminal-default fallback, live `t` cycling, persistence, and `?` help entries in both plugins. / Adicionar temas nomeados configuráveis, fallback para cores do terminal, alternância ao vivo com `t`, persistência e entradas na ajuda `?` nos dois plugins.
+- [x] Add reusable native buttons and modal controls with keyboard activation and optional terminal-supported mouse input; keep action semantics in each plugin. / Adicionar botões e controles de modal nativos e reutilizáveis, com ativação por teclado e entrada opcional de mouse quando suportada pelo terminal; manter o significado das ações em cada plugin.
+- [x] Add a canonical bundle sync/check workflow and conformance checks for both vendored copies. / Adicionar um fluxo de sincronização/verificação do pacote canônico e verificações de conformidade para as duas cópias embutidas.
+- [x] Document the package API, supported themes, per-plugin configuration, and release/update process. / Documentar a API do pacote, temas suportados, configuração de cada plugin e processo de release/atualização.
+- [ ] Run the flow's required validation and inspect theme changes in both viewers. / Executar a validação exigida pelo flow e inspecionar a troca de temas nos dois viewers.

@@ -10,6 +10,7 @@ import traceback
 from herdr_shared_ui import (
     draw_heavy_frame, draw_title_bar, fill_row, initialize_colors, safe_addnstr,
 )
+from herdr_shared_ui.controls import Button, Modal
 
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
 from .keys import ALT_DOWN, ALT_UP, read_key
@@ -39,6 +40,7 @@ from .markdown import (
     split_code_fences,
 )
 from .transcript import fetch_transcript, load_meta
+from .settings import next_theme, save_theme, selected_theme
 
 
 # Open comment box: top divider, three text rows, and the frame's bottom edge.
@@ -77,6 +79,7 @@ class Composer:
         self.status = ""
         self.sent = False
         self.colors: dict[str, int] = {}
+        self.theme = selected_theme()
         # Typing state for the open comment box; None while it is closed.
         self.editor: TextBuffer | None = None
         self.edit_top = 0
@@ -147,6 +150,8 @@ class Composer:
                 self.edit_comment(screen)
             elif key == ord("y"):
                 self.copy_selection()
+            elif key == ord("t"):
+                self.cycle_theme()
             elif key == ord("?"):
                 self.show_help(screen)
             elif key == ord("s"):
@@ -198,7 +203,12 @@ class Composer:
             "prompt": (curses.COLOR_WHITE, -1),
             "tool": (245 if color_count >= 256 else curses.COLOR_BLUE, -1),
             "comment_badge": (curses.COLOR_BLACK, curses.COLOR_YELLOW),
-        })
+        }, theme=self.theme)
+
+    def cycle_theme(self) -> None:
+        self.theme = next_theme(self.theme)
+        self.setup_colors()
+        self.status = f"Theme: {self.theme}" if save_theme(self.theme) else f"Theme: {self.theme} (not saved)"
 
     def style(self, name: str, fallback: int = 0) -> int:
         return self.colors.get(name, fallback)
@@ -638,6 +648,10 @@ class Composer:
         modal_x = max(0, (width - modal_width) // 2)
         modal = curses.newwin(modal_height, modal_width, modal_y, modal_x)
         modal.keypad(True)
+        controls = Modal(
+            [Button("Back", "back"), Button(yes_label, "confirm")],
+            {"back": lambda: False, "confirm": lambda: True},
+        )
         while True:
             modal.erase()
             modal.box()
@@ -656,14 +670,10 @@ class Composer:
                 message,
                 modal_width - 6,
             )
-            buttons = f"[ Enter / n: go back ]    [ {yes_label} ]"
-            safe_addnstr(
-                modal,
-                4,
-                max(2, (modal_width - len(buttons)) // 2),
-                buttons,
-                modal_width - 4,
+            controls.draw_buttons(
+                modal, 4, max(2, (modal_width - len(yes_label) - 18) // 2),
                 self.style("comment", curses.A_BOLD),
+                self.style("active_cursor", curses.A_REVERSE) | curses.A_BOLD,
             )
             safe_addnstr(
                 modal,
@@ -677,8 +687,11 @@ class Composer:
             key = modal.get_wch()
             if key in ("y", "Y"):
                 return True
-            if key in ("n", "N", "\n", "\r", "\x1b", curses.KEY_ENTER):
+            if key in ("n", "N", "\x1b"):
                 return False
+            action = controls.handle_key(key)
+            if action is not None:
+                return action
 
     def submit(self, screen: curses.window) -> bool:
         if not self.comments:

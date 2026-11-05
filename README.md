@@ -74,6 +74,7 @@ While navigating:
 | `y` | Copy the selected blocks through OSC 52 |
 | `s` | Send all comments to the source agent |
 | `Esc` | End the selection; if there is none, close the composer |
+| `t` | Cycle and save the viewer theme |
 | `?` | Show all the shortcuts in a window (`Esc`, `?` or `q` closes it) |
 | `q` | Close the composer |
 
@@ -111,6 +112,7 @@ An environment variable with the same name, set where Herdr runs, overrides it.
 | --- | --- | --- |
 | `OCC_MAX_LINES` | `500` | Transcript lines to load |
 | `OCC_SIGNATURE` | unset | Signature line appended to the sent prompt, e.g. `@your-handle` |
+| `OCC_THEME` | `terminal` | Shared viewer theme: `terminal`, `herdr-dark`, `midnight`, or `paper` |
 
 Runtime files (per-workspace pane metadata and `crash.log`) live in the plugin
 state directory. Launcher errors appear in
@@ -210,3 +212,16 @@ para este checkout. Confira o digest indicado em `PIN`, atualize a versão e o
 digest neste README e no teste de conformidade, execute os testes e confira a
 interface no terminal. Inclua a cópia embutida no commit do plugin para que o
 update normal do Herdr instale todos os arquivos necessários.
+
+
+### UI tests
+
+Run the Composer curses UI in a virtual terminal, including theme switching,
+help, and keyboard-operated confirmation:
+
+```sh
+uv run --no-project --with pyte python3 -m unittest tests.test_ui_e2e -v
+```
+
+The canonical Spec Review checkout can sync and check this vendored bundle with
+`python3 tools/check_shared_ui_bundle.py --sync /path/to/herdr-output-comment-composer/herdr_shared_ui`.

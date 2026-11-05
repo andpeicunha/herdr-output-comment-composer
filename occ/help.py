@@ -41,6 +41,10 @@ COMPOSER_HELP: list[Section] = [
         ],
     ),
     (
+        "View",
+        [("t", "cycle and save the viewer theme")],
+    ),
+    (
         "Other",
         [
             ("q", "close (asks first when comments are not sent)"),

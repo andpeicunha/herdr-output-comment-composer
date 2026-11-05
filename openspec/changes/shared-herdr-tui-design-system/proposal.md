@@ -1,0 +1,11 @@
+## Why / Por quê
+
+Output Comment Composer and Spec Review currently carry duplicate Markdown rendering code and similar TUI layout behavior. Fixes can land in one plugin and be missed in the other. A small, composable, native Python TUI package can make shared behavior consistent while keeping each viewer's interactions local. / Output Comment Composer e Spec Review mantêm código duplicado de renderização Markdown e comportamentos de layout TUI semelhantes. Correções podem chegar a um plugin e faltar no outro. Um pacote TUI pequeno, componível e nativo em Python pode manter os comportamentos compartilhados consistentes sem tirar de cada viewer suas interações próprias.
+
+## What changes / O que muda
+
+Evolve the bundled `herdr_shared_ui` package into a lightweight, open-source TUI design system inspired by shadcn's composable approach, using Python and `curses` without Textual or another runtime framework. Extract the identical Markdown implementation and stable layout primitives; add semantic themes that each plugin can configure and switch live with `t`; provide native reusable buttons and modal controls; document shortcuts in `?`; and provide a sync check for both bundled copies. / Evoluir o pacote embutido `herdr_shared_ui` para um design system TUI open source e leve, inspirado na composição do shadcn, usando Python e `curses`, sem Textual ou outro framework de execução. Extrair a implementação Markdown idêntica e os primitivos estáveis de layout; adicionar temas semânticos configuráveis em cada plugin e alternáveis ao vivo com `t`; oferecer botões e controles de modal nativos e reutilizáveis; documentar os atalhos em `?`; e fornecer uma verificação de sincronização das duas cópias embutidas.
+
+## Impact / Impacto
+
+The canonical source remains in `herdr-spec-review/herdr_shared_ui`; both plugins bundle the same pinned version and start without network access or a sibling checkout. Zoom, navigation, selection, cursor behavior, and comments remain plugin-specific. / A fonte canônica continua em `herdr-spec-review/herdr_shared_ui`; os dois plugins embutem a mesma versão fixada e iniciam sem rede ou checkout irmão. Zoom, navegação, seleção, comportamento do cursor e comentários continuam específicos de cada plugin.
