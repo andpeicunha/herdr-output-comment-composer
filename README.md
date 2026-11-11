@@ -19,8 +19,7 @@ Plugin site: [Output Comment Composer](https://portfolio-andrepeixoto.vercel.app
   a `─ code · lang ─` marker, and tables with aligned columns. A table that does
   not fit the pane shows as one record per row (`Name: value` lines with the full
   text, no cut cells), like the agent UIs do.
-- Opens a comment box for the current block; multiline comments, `Tab` to jump
-  to the next block while typing, a confirmation before discarding a draft, and
+- Opens a comment box for the current block; multiline comments, a confirmation before discarding a draft, and
   a confirmation before closing with comments you have not sent.
 - Shows a scrollbar and a `top` / `NN%` / `end` position, with page navigation
   on `Alt+↑` / `Alt+↓` (half a page).
@@ -88,7 +87,6 @@ While the comment box is open:
 | Key | Action |
 | --- | --- |
 | `Enter` | New line |
-| `Tab` / `Shift+Tab` | Save and keep typing on the next / previous block |
 | `Ctrl+S` | Save the comment and close the box |
 | `Ctrl+U` | Clear the current line |
 | `Esc` | Cancel; asks before discarding changes |

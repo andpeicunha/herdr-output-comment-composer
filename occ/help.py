@@ -34,7 +34,6 @@ COMPOSER_HELP: list[Section] = [
         "While writing a comment",
         [
             ("Ctrl+S", "save and close the box"),
-            ("Tab / Shift+Tab", "save and go to the next / previous block"),
             ("Enter", "new line"),
             ("Ctrl+U", "clear the current line"),
             ("Esc", "cancel (asks first when you changed it)"),

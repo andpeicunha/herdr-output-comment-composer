@@ -536,7 +536,7 @@ class Composer:
             visual_rows[self.edit_top : self.edit_top + inner_height], 1
         ):
             safe_addnstr(screen, top + offset, 2, text, inner_width)
-        help_text = " Ctrl+S save · Ctrl+U clear · Tab/⇧Tab next/prev · Enter newline · Esc cancel "
+        help_text = " Ctrl+S save · Ctrl+U clear · Enter newline · Esc cancel "
         safe_addnstr(screen, height - 1, 2, help_text, width - 4, self.style("muted"))
         try:
             screen.move(top + 1 + cursor_row - self.edit_top, 2 + min(cursor_col, inner_width - 1))
@@ -594,13 +594,6 @@ class Composer:
                 if key == "\x13":
                     self.save_editor()
                     return
-                if key in ("\t", curses.KEY_BTAB):
-                    # Save, then keep typing on the next/previous block.
-                    self.save_editor()
-                    step = 1 if key == "\t" else -1
-                    self.cursor = min(max(0, self.cursor + step), len(self.lines) - 1)
-                    original = self.open_editor()
-                    continue
                 if key == "\x1b":
                     if needs_discard_confirmation(original, editor.text):
                         curses.curs_set(0)
