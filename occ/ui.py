@@ -19,6 +19,7 @@ from herdr_shared_ui.mermaid import (
 )
 
 from .editor import TextBuffer, needs_close_confirmation, needs_discard_confirmation
+from .refocus import install_redraw_handler, register_pane, unregister_pane
 from .keys import ALT_DOWN, ALT_UP, read_key
 from .help import COMPOSER_HELP, clamp_scroll, help_layout
 from .herdr_io import copy_text_to_clipboard, fetch_snapshot, send_comments
@@ -762,10 +763,14 @@ def main() -> None:
             termios.tcsetattr(0, termios.TCSANOW, attrs)
         except termios.error:
             original_termios = None
+    own_pane = os.environ.get("HERDR_PANE_ID", "")
+    install_redraw_handler()
+    register_pane(own_pane)
     try:
         curses.set_escdelay(25)
         curses.wrapper(Composer(source_pane, meta).run)
     finally:
+        unregister_pane(own_pane)
         if original_termios is not None:
             try:
                 termios.tcsetattr(0, termios.TCSANOW, original_termios)

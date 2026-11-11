@@ -28,3 +28,13 @@ id = "close"
 title = "output comments: close composer"
 contexts = ["pane", "workspace"]
 command = ["bash", "herdr/pane.sh", "close"]
+
+# Zoom follows the tab's focused pane: bring the composer back when its tab/workspace
+# becomes active again. Deliberately NOT pane.focused (must not steal focus in a tab).
+[[events]]
+on = "tab.focused"
+command = ["python3", "-m", "occ.refocus"]
+
+[[events]]
+on = "workspace.focused"
+command = ["python3", "-m", "occ.refocus"]

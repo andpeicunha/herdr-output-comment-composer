@@ -7,6 +7,8 @@ sequence ESC [ 1 ; 3 A. read_key turns all of them into the ALT_* codes below.
 
 import curses
 
+from .refocus import consume_redraw
+
 ALT_UP = 0x10001
 ALT_DOWN = 0x10002
 
@@ -38,6 +40,11 @@ def read_key(screen: curses.window, wait_ms: int = -1) -> int:
     """Read one key; wait_ms is the usual curses timeout (-1 blocks)."""
     screen.timeout(wait_ms)
     key = screen.getch()
+    if consume_redraw():
+        # The plugin pane became visible again: repaint every cell on the next refresh.
+        screen.clearok(True)
+        if key == -1:
+            return curses.KEY_RESIZE
     if key > 255:
         try:
             name = curses.keyname(key)
